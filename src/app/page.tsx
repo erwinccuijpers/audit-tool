@@ -273,7 +273,7 @@ export default function InterviewPage() {
         .eq('session_id', session.id)
         .eq('question_id', currentQ.id)
         .single()
-      if (resp?.conversation?.length > 0) {
+      if (resp && resp.conversation && resp.conversation.length > 0) {
         resumeConv = [
           ...resp.conversation,
           { role: 'assistant' as const, content: `Welcome back. Let's continue.` },
