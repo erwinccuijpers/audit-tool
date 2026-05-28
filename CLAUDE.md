@@ -56,7 +56,7 @@ A structured business diagnostic interview tool that helps small business owners
 ---
 
 ## What's been built and works
-- Full multi-phase interview (intro → classify → interview → report)
+- Full multi-phase interview (intro → classify → save-prompt → interview → report)
 - Business profiling and question filtering
 - Rolling context summaries
 - Precheck skip logic (skips questions already covered organically)
@@ -64,18 +64,30 @@ A structured business diagnostic interview tool that helps small business owners
 - Progress bar
 - Results page
 - Supabase persistence (sessions + responses)
-- Deployed on Vercel, code on GitHub, auto-deploys on push to main
+- **Auth (Supabase email + password)** — account creation on save-prompt screen, sign in to resume
+- **Save & resume** — session state (current_q_index, completed_summaries) persisted to Supabase after each question; full chat history restored on resume by loading saved response conversations
+- **Forgot password** — reset link via email, password update screen on return
+- **Category flow strip** — deduped category pills below header, highlights current area, checks off completed ones
+- **"✓ saving" badge** in header when user is logged in
+- Live at **pocketcmo.pro**, code on GitHub at erwinccuijpers/audit-tool
 
 ---
+
+## Supabase schema additions (beyond defaults)
+Sessions table extra columns:
+- `user_id` uuid — links session to auth user
+- `current_q_index` integer default 0 — which question to resume at
+- `completed_summaries` jsonb default '[]' — rolling summary array for context
+
+Auth: email + password, email confirmation disabled, Site URL set to https://pocketcmo.pro
 
 ## What's actively being built next
 See `_RAW_IDEAS.md` in Erwin's Obsidian vault at:
 `/Users/erwincuijpers/Desktop/ErwinsVault/ErwinsVault/MVPs/_RAW_IDEAS.md`
 
 Current Next Up priority order:
-1. Save & resume conversation (email capture + session persistence)
-2. Upfront framing / "reality check" intro screen
-3. In-between progress report (gap analysis as re-engagement hook)
+1. In-between progress report (gap analysis as re-engagement hook)
+2. Upfront framing / "reality check" intro screen (partially done via save-prompt)
 
 ---
 
