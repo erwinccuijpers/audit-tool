@@ -1,65 +1,557 @@
-import Image from "next/image";
+'use client'
+import { useState, useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabase'
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+type Question = {
+  id: string
+  category: string
+  core_question: string
+  weakness: string
+  tool_note: string | null
+  sort_order: number
+  applies_to: string[]
+  follow_ups: { text: string }[]
+}
+
+type Message = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+type BusinessProfile = {
+  business_description: string
+  business_type: string
+  industry: string
+  awareness_level: string
+  owner_tone: string
+  first_name: string | null
+  skip_questions: string[]
+  emphasis_areas: string[]
+}
+
+type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'done'
+
+const INTRO_OPENER = `Tell me about your business like you're explaining it to someone you just met — what do you do, who do you do it for, and what's the thing you're most proud of?`
+
+const INTRO_FOLLOWUPS = [
+  `And if you're being honest with yourself — do you have a gut feeling about where you're leaving money on the table, or are you here because you genuinely don't know?`,
+]
+
+const TRANSITIONS = [
+  "Got it.",
+  "Makes sense.",
+  "Noted.",
+  "Good to know.",
+  "That helps.",
+  "Understood.",
+  "Appreciate that.",
+  "Clear.",
+]
+
+function getTransition(index: number) {
+  return TRANSITIONS[index % TRANSITIONS.length]
+}
+
+export default function InterviewPage() {
+  const [phase, setPhase] = useState<Phase>('start')
+  const [allQuestions, setAllQuestions] = useState<Question[]>([])
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [qIndex, setQIndex] = useState(0)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [profile, setProfile] = useState<BusinessProfile | null>(null)
+  const [conversation, setConversation] = useState<Message[]>([])
+  const [introConversation, setIntroConversation] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [businessName, setBusinessName] = useState('')
+  const [completedSummaries, setCompletedSummaries] = useState<{question: string, summary: string}[]>([])
+  const [introTurns, setIntroTurns] = useState(0)
+  const [transitionCount, setTransitionCount] = useState(0)
+  const [aiError, setAiError] = useState(false)
+  const lastPayload = useRef<object | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase
+        .from('questions')
+        .select('*, follow_ups(text, sort_order)')
+        .order('sort_order')
+      if (data) setAllQuestions(data)
+    }
+    load()
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [conversation, introConversation])
+
+  async function startSession() {
+    if (!businessName.trim() || allQuestions.length === 0) return
+    const { data } = await supabase
+      .from('sessions')
+      .insert({ business_name: businessName, status: 'intro' })
+      .select()
+      .single()
+    if (data) {
+      setSessionId(data.id)
+      sessionStorage.setItem('audit_session_id', data.id)
+      setPhase('intro')
+      const opener: Message = { role: 'assistant', content: INTRO_OPENER }
+      setIntroConversation([opener])
+      setConversation([opener])
+    }
+  }
+
+  async function classifyAndTransition(finalIntroConv: Message[]) {
+    setPhase('classifying')
+
+    let detectedProfile
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 40000)
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation: finalIntroConv, businessName }),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error('classify error')
+      const json = await res.json()
+      detectedProfile = json.profile
+    } catch {
+      setAiError(true)
+      setPhase('interview')
+      return
+    }
+    setProfile(detectedProfile)
+
+    await supabase.from('sessions').update({
+      business_description: detectedProfile.business_description,
+      business_type: detectedProfile.business_type,
+      industry: detectedProfile.industry,
+      awareness_level: detectedProfile.awareness_level,
+      owner_tone: detectedProfile.owner_tone,
+      status: 'in_progress',
+    }).eq('id', sessionId)
+
+    const filtered = allQuestions.filter(q => {
+      if (detectedProfile.skip_questions?.includes(q.id)) return false
+      if (!q.applies_to || q.applies_to.length === 0) return true
+      return q.applies_to.includes(detectedProfile.business_type) || q.applies_to.includes('all')
+    })
+
+    setQuestions(filtered)
+
+    const awarenessLine = detectedProfile.awareness_level === 'knows_the_gap'
+      ? `You already have a sense of where the gaps are — let's see if the numbers back that up.`
+      : detectedProfile.awareness_level === 'has_a_hunch'
+      ? `You have a hunch something's off — let's dig into where exactly.`
+      : `Let's map out the full picture and find where the opportunities are hiding.`
+
+    const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex things are, this usually takes between 10 and 20 minutes. Some questions will feel obvious, some might surprise you. Just answer honestly.\n\n${filtered[0].core_question}`
+
+    setConversation(prev => [...prev, { role: 'assistant', content: transition }])
+    setPhase('interview')
+  }
+
+  async function sendIntro(userInput: string) {
+    const userMsg: Message = { role: 'user', content: userInput }
+    const newConv = [...conversation, userMsg]
+    setConversation(newConv)
+    setInput('')
+    setLoading(true)
+
+    const newTurns = introTurns + 1
+    setIntroTurns(newTurns)
+
+    if (newTurns >= 2) {
+      await classifyAndTransition(newConv)
+      setLoading(false)
+      return
+    }
+
+    const followup = INTRO_FOLLOWUPS[newTurns - 1]
+    if (followup) {
+      setConversation(prev => [...prev, { role: 'assistant', content: followup }])
+    }
+    setLoading(false)
+  }
+
+  async function saveResponse(qId: string, conv: Message[]) {
+    if (!sessionId) return
+    const { error } = await supabase.from('responses').upsert({
+      session_id: sessionId,
+      question_id: qId,
+      conversation: conv,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'session_id,question_id' })
+    if (error) console.error('Save error:', error.message)
+  }
+
+  async function checkIfAlreadyCovered(
+    q: Question,
+    summaries: {question: string, summary: string}[]
+  ): Promise<boolean> {
+    if (summaries.length === 0) return false
+    const res = await fetch('/api/precheck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: q.core_question,
+        context: summaries,
+        businessProfile: profile,
+      }),
+    })
+    const { covered } = await res.json()
+    return covered === true
+  }
+
+  async function sendInterview(userInput: string) {
+    const currentQ = questions[qIndex]
+    const userMsg: Message = { role: 'user', content: userInput }
+    const newConv = [...conversation, userMsg]
+    setConversation(newConv)
+    setInput('')
+    setLoading(true)
+
+    const payload = {
+      question: currentQ.core_question,
+      followUps: currentQ.follow_ups.map((f: { text: string }) => f.text),
+      toolNote: currentQ.tool_note,
+      conversation: newConv,
+      previousContext: completedSummaries,
+      businessProfile: profile,
+    }
+    lastPayload.current = payload
+
+    let message: string
+    let isComplete: boolean
+
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 40000)
+      const res = await fetch('/api/interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error('API error')
+      const data = await res.json()
+      message = data.message
+      isComplete = data.isComplete
+    } catch {
+      setAiError(true)
+      setLoading(false)
+      return
+    }
+
+    if (isComplete) {
+      await saveResponse(currentQ.id, newConv)
+      const ownerReplies = newConv.filter(m => m.role === 'user').map(m => m.content).join(' / ')
+      const newSummary = { question: currentQ.core_question, summary: ownerReplies }
+      const updatedSummaries = [...completedSummaries, newSummary]
+      setCompletedSummaries(updatedSummaries)
+
+      let nextIndex = qIndex + 1
+      while (nextIndex < questions.length) {
+        const candidate = questions[nextIndex]
+        const alreadyCovered = await checkIfAlreadyCovered(candidate, updatedSummaries)
+        if (!alreadyCovered) break
+        await saveResponse(candidate.id, [])
+        nextIndex++
+      }
+
+      const tc = transitionCount
+      setTransitionCount(tc + 1)
+
+      if (nextIndex >= questions.length) {
+        await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId)
+        setConversation(prev => [...prev, {
+          role: 'assistant',
+          content: `That's everything I need. Building your report now...`,
+        }])
+        setPhase('done')
+        setTimeout(() => {
+          window.location.href = `/results?session=${sessionId}`
+        }, 2000)
+      } else {
+        const nextQ = questions[nextIndex]
+        const transition = getTransition(tc)
+        setConversation(prev => [...prev, {
+          role: 'assistant',
+          content: `${transition} Moving on.\n\n${nextQ.core_question}`,
+        }])
+        setQIndex(nextIndex)
+      }
+    } else {
+      // Only add assistant message if it's a real follow-up, not a COMPLETE signal
+      if (message && message.trim().length > 0) {
+        const assistantMsg: Message = { role: 'assistant', content: message }
+        setConversation(prev => [...prev, assistantMsg])
+        await saveResponse(currentQ.id, [...newConv, assistantMsg])
+      }
+    }
+
+    setLoading(false)
+  }
+
+  async function send() {
+    if (!input.trim() || loading) return
+    if (phase === 'intro') await sendIntro(input)
+    else if (phase === 'interview') await sendInterview(input)
+  }
+
+  const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
+
+  if (phase === 'start') {
+    return (
+      <div style={{
+        minHeight: "100dvh",
+        background: '#0C0C09', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
+      }}>
+        <div style={{
+          background: '#111110', border: '1px solid #222218', borderRadius: 12,
+          padding: '32px 28px', width: '100%', maxWidth: 420,
+        }}>
+          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
+          <h1 style={{ color: '#E8E0D0', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
+          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 28, lineHeight: 1.6 }}>
+            10–20 minutes depending on the complexity of your business — maps exactly where you're leaving money on the table.
           </p>
+          <input
+            placeholder="What's your business called?"
+            value={businessName}
+            onChange={e => setBusinessName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && startSession()}
+            style={{
+              width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
+              padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
+              outline: 'none', marginBottom: 12, boxSizing: 'border-box',
+            }}
+          />
+          <button onClick={startSession} style={{
+            width: '100%', background: '#C8A96E', border: 'none', borderRadius: 6,
+            padding: '14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 14,
+            fontWeight: 500, cursor: 'pointer',
+          }}>
+            Start →
+          </button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </div>
+    )
+  }
+
+  if (phase === 'classifying') {
+    return (
+      <div style={{ minHeight: "100dvh", background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', padding: '0 20px' }}>
+          <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, marginBottom: 8 }}>Analysing your business...</div>
+          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>Personalising the interview for you</div>
+        </div>
+      </div>
+    )
+  }
+
+  async function retryLastMessage() {
+    if (!lastPayload.current) return
+    setAiError(false)
+    setLoading(true)
+
+    let message: string
+    let isComplete: boolean
+
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 40000)
+      const res = await fetch('/api/interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lastPayload.current),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error('retry failed')
+      const data = await res.json()
+      message = data.message
+      isComplete = data.isComplete
+    } catch {
+      setAiError(true)
+      setLoading(false)
+      return
+    }
+
+    const currentQ = questions[qIndex]
+    if (isComplete) {
+      await saveResponse(currentQ.id, conversation)
+      if (qIndex + 1 >= questions.length) {
+        await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId)
+        setConversation(prev => [...prev, { role: 'assistant', content: "That\'s everything — thank you. Building your report now..." }])
+        setPhase('done')
+        setTimeout(() => { window.location.href = `/results?session=${sessionId}` }, 2000)
+      } else {
+        const nextQ = questions[qIndex + 1]
+        setConversation(prev => [...prev, { role: 'assistant', content: `Got it. Moving on.\n\n${nextQ.core_question}` }])
+        setQIndex(qIndex + 1)
+      }
+    } else {
+      setConversation(prev => [...prev, { role: 'assistant', content: message }])
+    }
+
+    setLoading(false)
+    setAiError(false)
+  }
+
+
+  return (
+    <div style={{
+      height: '100dvh',
+      background: '#0C0C09', display: 'flex', flexDirection: 'column',
+      fontFamily: 'Georgia, serif', overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        background: '#0F0F0B', borderBottom: '1px solid #1A1A14',
+        padding: '10px 16px', display: 'flex', alignItems: 'center',
+        gap: 10, flexShrink: 0, flexWrap: 'wrap',
+      }}>
+        <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.1em' }}>BUSINESS AUDIT</span>
+        <span style={{ color: '#C8A96E', fontSize: 12, fontFamily: 'monospace' }}>{businessName}</span>
+        {profile && (
+          <span style={{
+            fontSize: 10, fontFamily: 'monospace', color: '#3A3A28',
+            background: '#141410', border: '1px solid #1E1E14',
+            borderRadius: 4, padding: '2px 7px',
+          }}>
+            {profile.industry} · {profile.business_type}
+          </span>
+        )}
+        {phase === 'interview' && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 80, height: 3, background: '#1A1A14', borderRadius: 2 }}>
+              <div style={{ width: `${progress}%`, height: '100%', background: '#C8A96E', borderRadius: 2, transition: 'width 0.5s' }} />
+            </div>
+            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#4A4A38' }}>{qIndex}/{questions.length}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {conversation.map((msg, i) => (
+            <div key={i} style={{
+              marginBottom: 16,
+              display: 'flex',
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            }}>
+              <div style={{
+                maxWidth: '85%',
+                background: msg.role === 'user' ? '#1A1A12' : '#111110',
+                border: `1px solid ${msg.role === 'user' ? '#2A2A1E' : '#1A1A14'}`,
+                borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                padding: '12px 16px',
+                color: '#D0C8B8',
+                fontSize: 15,
+                lineHeight: 1.65,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {loading && !aiError && (
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{
+                background: '#111110', border: '1px solid #1A1A14',
+                borderRadius: '16px 16px 16px 4px', padding: '12px 16px',
+              }}>
+                <span style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 12 }}>thinking...</span>
+              </div>
+            </div>
+          )}
+
+          {aiError && (
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{
+                background: '#131208', border: '1px solid rgba(180,120,40,0.25)',
+                borderRadius: '16px 16px 16px 4px', padding: '14px 18px',
+                maxWidth: '78%', display: 'flex', flexDirection: 'column', gap: 12,
+              }}>
+                <span style={{ color: '#9A8060', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.55 }}>
+                  Sorry — that took longer than expected. Your answers are saved. Pick up right where you left off.
+                </span>
+                <button
+                  onClick={retryLastMessage}
+                  style={{
+                    alignSelf: 'flex-start',
+                    background: '#C8A96E', border: 'none', borderRadius: 6,
+                    padding: '7px 14px', color: '#0C0C09',
+                    fontFamily: 'monospace', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', letterSpacing: '0.03em',
+                  }}
+                >
+                  ↩ Continue where I left off
+                </button>
+              </div>
+            </div>
+          )}
+          {phase === 'done' && (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 12 }}>
+              ✓ Redirecting to your report...
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      {/* Input */}
+      {(phase === 'intro' || phase === 'interview') && (
+        <div style={{
+          borderTop: '1px solid #1A1A14', padding: '12px 16px',
+          background: '#0F0F0B', flexShrink: 0,
+        }}>
+          <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', gap: 8 }}>
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+              placeholder="Type your answer..."
+              rows={2}
+              style={{
+                flex: 1, background: '#111110', border: '1px solid #222218',
+                borderRadius: 10, padding: '10px 14px', color: '#E8E0D0',
+                fontFamily: 'monospace', fontSize: 14, outline: 'none',
+                resize: 'none', lineHeight: 1.5, WebkitAppearance: 'none',
+              }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button
+              onClick={send}
+              disabled={loading || !input.trim()}
+              style={{
+                background: loading || !input.trim() ? '#1A1A14' : '#C8A96E',
+                border: 'none', borderRadius: 10, padding: '0 18px',
+                color: loading || !input.trim() ? '#4A4A38' : '#0C0C09',
+                fontFamily: 'monospace', fontSize: 13, fontWeight: 500,
+                cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+                minWidth: 64, flexShrink: 0,
+              }}
+            >
+              Send
+            </button>
+          </div>
         </div>
-      </main>
+      )}
     </div>
-  );
+  )
 }
