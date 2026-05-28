@@ -1,81 +1,39 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+type Summary = { question: string; summary: string }
+type CategoryData = { name: string; covered: Summary[]; uncovered: string[] }
 
 export async function POST(req: NextRequest) {
-  const { sessionId } = await req.json()
-  if (!sessionId) return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
+  const { businessName, businessType, industry, businessDescription, ownerTone, categoryData } = await req.json()
 
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('id', sessionId)
-    .single()
+  if (!categoryData || categoryData.length === 0) {
+    return NextResponse.json({ categories: [] })
+  }
 
-  if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-
-  const { data: questions } = await supabase
-    .from('questions')
-    .select('id, category, core_question, applies_to')
-    .order('sort_order')
-
-  if (!questions) return NextResponse.json({ error: 'No questions' }, { status: 500 })
-
-  const businessType = session.business_type || 'all'
-  const filtered = questions.filter((q: any) => {
-    if (!q.applies_to || q.applies_to.length === 0) return true
-    return q.applies_to.includes(businessType) || q.applies_to.includes('all')
-  })
-
-  // Build ordered unique category list
-  const categoryOrder: string[] = []
-  const categoryQuestions = new Map<string, string[]>()
-  filtered.forEach((q: any) => {
-    if (!q.category) return
-    if (!categoryQuestions.has(q.category)) {
-      categoryQuestions.set(q.category, [])
-      categoryOrder.push(q.category)
-    }
-    categoryQuestions.get(q.category)!.push(q.core_question)
-  })
-
-  const completedSummaries: { question: string; summary: string }[] = session.completed_summaries || []
-  const summaryMap = new Map(completedSummaries.map(s => [s.question, s.summary]))
-
-  // Build per-category coverage blocks
-  const coverageBlocks = categoryOrder.map(cat => {
-    const qs = categoryQuestions.get(cat) || []
-    const covered = qs
-      .filter(q => summaryMap.has(q))
-      .map(q => `  • Q: ${q}\n    Owner: ${summaryMap.get(q)}`)
-    const uncovered = qs.filter(q => !summaryMap.has(q))
-    return { cat, covered, uncovered }
-  })
-
-  const coveredSection = coverageBlocks
-    .filter(b => b.covered.length > 0)
-    .map(b => `### ${b.cat}\n${b.covered.join('\n')}`)
+  const coveredSection = (categoryData as CategoryData[])
+    .filter(c => c.covered.length > 0)
+    .map(c =>
+      `### ${c.name}\n${c.covered.map(cv => `  • Q: ${cv.question}\n    Owner: ${cv.summary}`).join('\n')}`
+    )
     .join('\n\n')
 
-  const uncoveredList = coverageBlocks
-    .filter(b => b.covered.length === 0)
-    .map(b => `- ${b.cat}`)
+  const uncoveredList = (categoryData as CategoryData[])
+    .filter(c => c.covered.length === 0)
+    .map(c => `- ${c.name}`)
     .join('\n')
 
-  const prompt = `You are analyzing a business diagnostic interview that is currently in progress. Produce honest, data-grounded insights for each category.
+  const allCategories = (categoryData as CategoryData[]).map(c => c.name)
+
+  const prompt = `You are analyzing a business diagnostic interview in progress. Produce honest, data-grounded insights for each category.
 
 BUSINESS CONTEXT:
-- Name: ${session.business_name}
-- Type: ${session.business_type || 'Unknown'} (${session.industry || 'unknown industry'})
-- Description: ${session.business_description || 'Not yet described'}
-- Owner tone: ${session.owner_tone || 'unknown'}
+- Name: ${businessName || 'Unknown'}
+- Type: ${businessType || 'Unknown'} (${industry || 'unknown industry'})
+- Description: ${businessDescription || 'Not yet described'}
+- Owner tone: ${ownerTone || 'unknown'}
 
 WHAT HAS BEEN DISCUSSED:
 ${coveredSection || 'Nothing covered yet.'}
@@ -83,8 +41,8 @@ ${coveredSection || 'Nothing covered yet.'}
 AREAS NOT YET COVERED:
 ${uncoveredList || 'All areas covered.'}
 
-Analyze each of these ${categoryOrder.length} categories:
-${categoryOrder.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+Analyze each of these ${allCategories.length} categories:
+${allCategories.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
 For each, return a JSON object with:
 - "category": exact name from the list above
@@ -118,5 +76,5 @@ Return ONLY a valid JSON array. No markdown, no preamble.`
     try { categories = match ? JSON.parse(match[0]) : [] } catch { categories = [] }
   }
 
-  return NextResponse.json({ categories, businessName: session.business_name })
+  return NextResponse.json({ categories })
 }
