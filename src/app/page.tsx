@@ -30,7 +30,7 @@ type BusinessProfile = {
   emphasis_areas: string[]
 }
 
-type Phase = 'start' | 'intro' | 'classifying' | 'save-prompt' | 'interview' | 'done'
+type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'done'
 
 const INTRO_OPENER = `Tell me about your business like you're explaining it to someone you just met — what do you do, who do you do it for, and what's the thing you're most proud of?`
 
@@ -85,6 +85,9 @@ export default function InterviewPage() {
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [interviewTransition, setInterviewTransition] = useState('')
+  const [showSaveOverlay, setShowSaveOverlay] = useState(false)
+  const [saveOverlayDismissed, setSaveOverlayDismissed] = useState(false)
+  const [overlayMode, setOverlayMode] = useState<'signup' | 'signin'>('signup')
 
   useEffect(() => {
     async function load() {
@@ -200,17 +203,7 @@ export default function InterviewPage() {
     const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${filtered[0].core_question}`
 
     setInterviewTransition(transition)
-
-    if (user) {
-      setConversation(prev => [...prev, { role: 'assistant', content: transition }])
-      setPhase('interview')
-    } else {
-      setPhase('save-prompt')
-    }
-  }
-
-  function proceedToInterview() {
-    setConversation(prev => [...prev, { role: 'assistant', content: interviewTransition }])
+    setConversation(prev => [...prev, { role: 'assistant', content: transition }])
     setPhase('interview')
   }
 
@@ -228,10 +221,13 @@ export default function InterviewPage() {
       setUser(data.user)
     }
     setAuthLoading(false)
-    proceedToInterview()
+    setShowSaveOverlay(false)
+    setAuthEmail('')
+    setAuthPassword('')
+    setAuthError('')
   }
 
-  async function handleSignIn() {
+  async function handleSignIn(fromOverlay = false) {
     setAuthLoading(true)
     setAuthError('')
     const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
@@ -242,6 +238,19 @@ export default function InterviewPage() {
     }
     if (!data.user) { setAuthLoading(false); return }
     setUser(data.user)
+
+    if (fromOverlay) {
+      if (sessionId) {
+        await supabase.from('sessions').update({ user_id: data.user.id }).eq('id', sessionId)
+      }
+      setShowSaveOverlay(false)
+      setAuthEmail('')
+      setAuthPassword('')
+      setAuthError('')
+      setAuthLoading(false)
+      return
+    }
+
     const { data: session } = await supabase
       .from('sessions')
       .select('*')
@@ -477,6 +486,12 @@ export default function InterviewPage() {
 
       const tc = transitionCount
       setTransitionCount(tc + 1)
+
+      // Show save overlay after question 6 for non-logged-in users (once only)
+      if (nextIndex >= 6 && !user && !saveOverlayDismissed) {
+        setShowSaveOverlay(true)
+        setSaveOverlayDismissed(true)
+      }
 
       if (nextIndex >= questions.length) {
         await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId)
@@ -729,7 +744,7 @@ export default function InterviewPage() {
                 onKeyDown={e => e.key === 'Enter' && handleSignIn()}
                 style={inputStyle}
               />
-              <button onClick={handleSignIn} disabled={authLoading} style={primaryBtn(authLoading)}>
+              <button onClick={() => handleSignIn()} disabled={authLoading} style={primaryBtn(authLoading)}>
                 {authLoading ? 'Signing in...' : 'Sign in →'}
               </button>
               <button
@@ -764,56 +779,6 @@ export default function InterviewPage() {
     )
   }
 
-  // ─── SAVE PROMPT ─────────────────────────────────────────────────────────────
-
-  if (phase === 'save-prompt') {
-    return (
-      <div style={cardWrap}>
-        <div style={card}>
-          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BEFORE WE DIVE IN</div>
-          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 10 }}>This takes 1–1.5 hours</h2>
-          <p style={{ color: '#7A7A5A', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.7, marginBottom: 24 }}>
-            Going deep is the only way to get a real picture. Create a free account to save your progress as you go — pick up anytime, on any device.<br /><br />
-            Bugs happen. Don't lose your work.
-          </p>
-
-          {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>}
-
-          <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
-          <input
-            type="password"
-            placeholder="Password (min. 6 characters)"
-            value={authPassword}
-            onChange={e => setAuthPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSignUp()}
-            style={inputStyle}
-          />
-          <button onClick={handleSignUp} disabled={authLoading} style={primaryBtn(authLoading)}>
-            {authLoading ? 'Creating account...' : 'Create account & save progress →'}
-          </button>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
-            <div style={{ flex: 1, height: 1, background: '#1A1A14' }} />
-            <span style={{ color: '#2E2E20', fontFamily: 'monospace', fontSize: 11 }}>or</span>
-            <div style={{ flex: 1, height: 1, background: '#1A1A14' }} />
-          </div>
-
-          <button
-            onClick={proceedToInterview}
-            style={{
-              width: '100%', background: 'transparent', border: '1px solid #1A1A14',
-              borderRadius: 6, padding: '11px 14px', color: '#3A3A28',
-              fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', lineHeight: 1.6,
-              textAlign: 'center',
-            }}
-          >
-            Skip for now
-            <div style={{ fontSize: 10, color: '#252518', marginTop: 2 }}>Progress may be lost if the page closes or an error occurs</div>
-          </button>
-        </div>
-      </div>
-    )
-  }
 
   // ─── INTERVIEW ───────────────────────────────────────────────────────────────
 
@@ -842,7 +807,7 @@ export default function InterviewPage() {
             {profile.industry} · {profile.business_type}
           </span>
         )}
-        {user && (
+        {user ? (
           <span style={{
             fontSize: 10, fontFamily: 'monospace', color: '#4A6A4A',
             background: '#101410', border: '1px solid #1A2A1A',
@@ -850,6 +815,17 @@ export default function InterviewPage() {
           }}>
             ✓ saving
           </span>
+        ) : saveOverlayDismissed && (
+          <button
+            onClick={() => setShowSaveOverlay(true)}
+            style={{
+              fontSize: 10, fontFamily: 'monospace', color: '#8A5A30',
+              background: '#1A1008', border: '1px solid rgba(180,100,30,0.3)',
+              borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            }}
+          >
+            ⚠ save progress
+          </button>
         )}
         {phase === 'interview' && (
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -942,6 +918,78 @@ export default function InterviewPage() {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* Save progress overlay */}
+      {showSaveOverlay && !user && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(12,12,9,0.93)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 200, padding: 20,
+        }}>
+          <div style={{
+            background: '#111110', border: '1px solid #2A2018',
+            borderRadius: 12, padding: '32px 28px', width: '100%', maxWidth: 420,
+          }}>
+            <div style={{ color: '#C07050', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>⚠ YOUR DATA IS NOT SAVED</div>
+            <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>Save your progress</h2>
+            <p style={{ color: '#6A6A4A', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.75, marginBottom: 20 }}>
+              Everything you've answered so far exists only in this browser tab. A page refresh, network error, or browser crash will permanently delete all of it — there is no recovery. Create a free account and your progress is saved after every answer.
+            </p>
+
+            {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>}
+
+            {overlayMode === 'signup' ? (
+              <>
+                <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
+                <input
+                  type="password"
+                  placeholder="Password (min. 6 characters)"
+                  value={authPassword}
+                  onChange={e => setAuthPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSignUp()}
+                  style={inputStyle}
+                />
+                <button onClick={handleSignUp} disabled={authLoading} style={primaryBtn(authLoading)}>
+                  {authLoading ? 'Saving...' : 'Create account & save progress →'}
+                </button>
+                <button onClick={() => { setOverlayMode('signin'); setAuthError('') }} style={ghostBtn}>
+                  Already have an account? Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={authPassword}
+                  onChange={e => setAuthPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSignIn(true)}
+                  style={inputStyle}
+                />
+                <button onClick={() => handleSignIn(true)} disabled={authLoading} style={primaryBtn(authLoading)}>
+                  {authLoading ? 'Signing in...' : 'Sign in & save progress →'}
+                </button>
+                <button onClick={() => { setOverlayMode('signup'); setAuthError('') }} style={ghostBtn}>
+                  New here? Create an account
+                </button>
+              </>
+            )}
+
+            <div style={{ height: 1, background: '#1A1A14', margin: '8px 0 12px' }} />
+            <button
+              onClick={() => { setShowSaveOverlay(false); setSaveOverlayDismissed(true) }}
+              style={{
+                width: '100%', background: 'transparent', border: 'none',
+                padding: '8px', color: '#2E2E1E', fontFamily: 'monospace', fontSize: 11,
+                cursor: 'pointer', lineHeight: 1.6, textAlign: 'center',
+              }}
+            >
+              I understand — I'll risk losing my data
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       {(phase === 'intro' || phase === 'interview') && (
