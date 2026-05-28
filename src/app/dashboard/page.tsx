@@ -54,7 +54,6 @@ function DashboardContent() {
     setLoading(true)
     setLoadingMessage('Loading your session...')
 
-    // Fetch session client-side (auth context → RLS works)
     const { data: session, error: sessionErr } = await supabase
       .from('sessions')
       .select('*')
@@ -68,9 +67,19 @@ function DashboardContent() {
     }
 
     setBusinessName(session.business_name || '')
+
+    const completedSummaries: { question: string; summary: string }[] = session.completed_summaries || []
+    const summaryCount = completedSummaries.length
+
+    // Serve from cache if summaries haven't changed since last generation
+    if (session.dashboard_cache && session.dashboard_cache_count === summaryCount) {
+      setCategories(session.dashboard_cache)
+      setLoading(false)
+      return
+    }
+
     setLoadingMessage('Loading question bank...')
 
-    // Fetch questions client-side
     const { data: questions, error: qErr } = await supabase
       .from('questions')
       .select('id, category, core_question, applies_to')
@@ -82,7 +91,6 @@ function DashboardContent() {
       return
     }
 
-    // Filter questions for this business type
     const businessType = session.business_type || ''
     const filtered = questions.filter((q: any) => {
       if (!q.applies_to || q.applies_to.length === 0) return true
@@ -90,7 +98,6 @@ function DashboardContent() {
       return q.applies_to.includes(businessType) || q.applies_to.includes('all')
     })
 
-    // Build ordered unique category list
     const categoryOrder: string[] = []
     const categoryQuestions = new Map<string, string[]>()
     filtered.forEach((q: any) => {
@@ -102,22 +109,18 @@ function DashboardContent() {
       categoryQuestions.get(q.category)!.push(q.core_question)
     })
 
-    const completedSummaries: { question: string; summary: string }[] = session.completed_summaries || []
     const summaryMap = new Map(completedSummaries.map(s => [s.question, s.summary]))
-
-    // Build per-category coverage for Claude
     const categoryData = categoryOrder.map(cat => {
       const qs = categoryQuestions.get(cat) || []
-      const covered = qs
-        .filter(q => summaryMap.has(q))
-        .map(q => ({ question: q, summary: summaryMap.get(q)! }))
-      const uncovered = qs.filter(q => !summaryMap.has(q))
-      return { name: cat, covered, uncovered }
+      return {
+        name: cat,
+        covered: qs.filter(q => summaryMap.has(q)).map(q => ({ question: q, summary: summaryMap.get(q)! })),
+        uncovered: qs.filter(q => !summaryMap.has(q)),
+      }
     })
 
     setLoadingMessage('Analysing your data...')
 
-    // Call Claude via API — pass the pre-processed data (no Supabase in API route)
     const res = await fetch('/api/dashboard', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -138,7 +141,15 @@ function DashboardContent() {
     }
 
     const data = await res.json()
-    setCategories(data.categories || [])
+    const freshCategories = data.categories || []
+    setCategories(freshCategories)
+
+    // Save to cache
+    await supabase.from('sessions').update({
+      dashboard_cache: freshCategories,
+      dashboard_cache_count: summaryCount,
+    }).eq('id', sid)
+
     setLoading(false)
   }
 
