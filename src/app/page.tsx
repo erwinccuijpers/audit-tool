@@ -29,7 +29,7 @@ type BusinessProfile = {
   emphasis_areas: string[]
 }
 
-type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'done'
+type Phase = 'start' | 'intro' | 'classifying' | 'save-prompt' | 'interview' | 'done'
 
 const INTRO_OPENER = `Tell me about your business like you're explaining it to someone you just met — what do you do, who do you do it for, and what's the thing you're most proud of?`
 
@@ -64,12 +64,22 @@ export default function InterviewPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [businessName, setBusinessName] = useState('')
-  const [completedSummaries, setCompletedSummaries] = useState<{question: string, summary: string}[]>([])
+  const [completedSummaries, setCompletedSummaries] = useState<{ question: string; summary: string }[]>([])
   const [introTurns, setIntroTurns] = useState(0)
   const [transitionCount, setTransitionCount] = useState(0)
   const [aiError, setAiError] = useState(false)
   const lastPayload = useRef<object | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // auth state
+  const [user, setUser] = useState<any>(null)
+  const [resumableSession, setResumableSession] = useState<any>(null)
+  const [showSignIn, setShowSignIn] = useState(false)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [interviewTransition, setInterviewTransition] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -86,11 +96,32 @@ export default function InterviewPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [conversation, introConversation])
 
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user ?? null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!user || allQuestions.length === 0 || phase !== 'start') return
+    supabase
+      .from('sessions')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'in_progress')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+      .then(({ data }) => { if (data) setResumableSession(data) })
+  }, [user, allQuestions, phase])
+
   async function startSession() {
     if (!businessName.trim() || allQuestions.length === 0) return
     const { data } = await supabase
       .from('sessions')
-      .insert({ business_name: businessName, status: 'intro' })
+      .insert({ business_name: businessName, status: 'intro', user_id: user?.id ?? null })
       .select()
       .single()
     if (data) {
@@ -152,8 +183,113 @@ export default function InterviewPage() {
 
     const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex things are, this usually takes between 10 and 20 minutes. Some questions will feel obvious, some might surprise you. Just answer honestly.\n\n${filtered[0].core_question}`
 
-    setConversation(prev => [...prev, { role: 'assistant', content: transition }])
+    setInterviewTransition(transition)
+
+    if (user) {
+      setConversation(prev => [...prev, { role: 'assistant', content: transition }])
+      setPhase('interview')
+    } else {
+      setPhase('save-prompt')
+    }
+  }
+
+  function proceedToInterview() {
+    setConversation(prev => [...prev, { role: 'assistant', content: interviewTransition }])
     setPhase('interview')
+  }
+
+  async function handleSignUp() {
+    setAuthLoading(true)
+    setAuthError('')
+    const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword })
+    if (error) {
+      setAuthError(error.message)
+      setAuthLoading(false)
+      return
+    }
+    if (data.user && sessionId) {
+      await supabase.from('sessions').update({ user_id: data.user.id }).eq('id', sessionId)
+      setUser(data.user)
+    }
+    setAuthLoading(false)
+    proceedToInterview()
+  }
+
+  async function handleSignIn() {
+    setAuthLoading(true)
+    setAuthError('')
+    const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+    if (error) {
+      setAuthError(error.message)
+      setAuthLoading(false)
+      return
+    }
+    if (!data.user) { setAuthLoading(false); return }
+    setUser(data.user)
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('user_id', data.user.id)
+      .eq('status', 'in_progress')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    if (session) {
+      await resumeSession(session)
+    } else {
+      setShowSignIn(false)
+    }
+    setAuthLoading(false)
+  }
+
+  async function resumeSession(session: any) {
+    setSessionId(session.id)
+    setBusinessName(session.business_name)
+    const restoredProfile: BusinessProfile = {
+      business_description: session.business_description || '',
+      business_type: session.business_type || '',
+      industry: session.industry || '',
+      awareness_level: session.awareness_level || '',
+      owner_tone: session.owner_tone || '',
+      first_name: null,
+      skip_questions: [],
+      emphasis_areas: [],
+    }
+    setProfile(restoredProfile)
+    const filtered = allQuestions.filter(q => {
+      if (!q.applies_to || q.applies_to.length === 0) return true
+      return q.applies_to.includes(session.business_type) || q.applies_to.includes('all')
+    })
+    setQuestions(filtered)
+    setCompletedSummaries(session.completed_summaries || [])
+    const qIdx = Math.min(session.current_q_index || 0, Math.max(0, filtered.length - 1))
+    setQIndex(qIdx)
+    const currentQ = filtered[qIdx]
+    let resumeConv: Message[] = []
+    if (currentQ) {
+      const { data: resp } = await supabase
+        .from('responses')
+        .select('conversation')
+        .eq('session_id', session.id)
+        .eq('question_id', currentQ.id)
+        .single()
+      if (resp?.conversation?.length > 0) {
+        resumeConv = [
+          ...resp.conversation,
+          { role: 'assistant' as const, content: `Welcome back. Let's continue.` },
+        ]
+      }
+    }
+    if (resumeConv.length === 0 && currentQ) {
+      resumeConv = [{
+        role: 'assistant' as const,
+        content: `Welcome back to ${session.business_name}. Let's pick up where we left off.\n\n${currentQ.core_question}`,
+      }]
+    }
+    setConversation(resumeConv)
+    setPhase('interview')
+    setShowSignIn(false)
+    setResumableSession(null)
   }
 
   async function sendIntro(userInput: string) {
@@ -192,7 +328,7 @@ export default function InterviewPage() {
 
   async function checkIfAlreadyCovered(
     q: Question,
-    summaries: {question: string, summary: string}[]
+    summaries: { question: string; summary: string }[]
   ): Promise<boolean> {
     if (summaries.length === 0) return false
     const res = await fetch('/api/precheck', {
@@ -279,6 +415,11 @@ export default function InterviewPage() {
           window.location.href = `/results?session=${sessionId}`
         }, 2000)
       } else {
+        await supabase.from('sessions').update({
+          current_q_index: nextIndex,
+          completed_summaries: updatedSummaries,
+        }).eq('id', sessionId)
+
         const nextQ = questions[nextIndex]
         const transition = getTransition(tc)
         setConversation(prev => [...prev, {
@@ -288,7 +429,6 @@ export default function InterviewPage() {
         setQIndex(nextIndex)
       }
     } else {
-      // Only add assistant message if it's a real follow-up, not a COMPLETE signal
       if (message && message.trim().length > 0) {
         const assistantMsg: Message = { role: 'assistant', content: message }
         setConversation(prev => [...prev, assistantMsg])
@@ -303,58 +443,6 @@ export default function InterviewPage() {
     if (!input.trim() || loading) return
     if (phase === 'intro') await sendIntro(input)
     else if (phase === 'interview') await sendInterview(input)
-  }
-
-  const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
-
-  if (phase === 'start') {
-    return (
-      <div style={{
-        minHeight: "100dvh",
-        background: '#0C0C09', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
-      }}>
-        <div style={{
-          background: '#111110', border: '1px solid #222218', borderRadius: 12,
-          padding: '32px 28px', width: '100%', maxWidth: 420,
-        }}>
-          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
-          <h1 style={{ color: '#E8E0D0', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
-          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 28, lineHeight: 1.6 }}>
-            10–20 minutes depending on the complexity of your business — maps exactly where you're leaving money on the table.
-          </p>
-          <input
-            placeholder="What's your business called?"
-            value={businessName}
-            onChange={e => setBusinessName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && startSession()}
-            style={{
-              width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
-              padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
-              outline: 'none', marginBottom: 12, boxSizing: 'border-box',
-            }}
-          />
-          <button onClick={startSession} style={{
-            width: '100%', background: '#C8A96E', border: 'none', borderRadius: 6,
-            padding: '14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 14,
-            fontWeight: 500, cursor: 'pointer',
-          }}>
-            Start →
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (phase === 'classifying') {
-    return (
-      <div style={{ minHeight: "100dvh", background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', padding: '0 20px' }}>
-          <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, marginBottom: 8 }}>Analysing your business...</div>
-          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>Personalising the interview for you</div>
-        </div>
-      </div>
-    )
   }
 
   async function retryLastMessage() {
@@ -390,7 +478,7 @@ export default function InterviewPage() {
       await saveResponse(currentQ.id, conversation)
       if (qIndex + 1 >= questions.length) {
         await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId)
-        setConversation(prev => [...prev, { role: 'assistant', content: "That\'s everything — thank you. Building your report now..." }])
+        setConversation(prev => [...prev, { role: 'assistant', content: "That's everything — thank you. Building your report now..." }])
         setPhase('done')
         setTimeout(() => { window.location.href = `/results?session=${sessionId}` }, 2000)
       } else {
@@ -406,6 +494,205 @@ export default function InterviewPage() {
     setAiError(false)
   }
 
+  const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
+
+  const inputStyle = {
+    width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
+    padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
+    outline: 'none', marginBottom: 10, boxSizing: 'border-box' as const,
+  }
+
+  const authButtonPrimary = (disabled: boolean) => ({
+    width: '100%', background: disabled ? '#1A1A14' : '#C8A96E', border: 'none', borderRadius: 6,
+    padding: '13px', color: disabled ? '#4A4A38' : '#0C0C09', fontFamily: 'monospace', fontSize: 14,
+    fontWeight: 500, cursor: disabled ? 'not-allowed' as const : 'pointer' as const,
+    opacity: disabled ? 0.7 : 1, marginBottom: 10,
+  })
+
+  // ─── START SCREEN ────────────────────────────────────────────────────────────
+
+  if (phase === 'start') {
+    return (
+      <div style={{
+        minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
+      }}>
+        <div style={{
+          background: '#111110', border: '1px solid #222218', borderRadius: 12,
+          padding: '32px 28px', width: '100%', maxWidth: 420,
+        }}>
+          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
+          <h1 style={{ color: '#E8E0D0', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
+          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 28, lineHeight: 1.6 }}>
+            Goes deep into how your business actually works — maps exactly where you're leaving money on the table.
+          </p>
+
+          {resumableSession && !showSignIn && (
+            <div style={{
+              background: '#141410', border: '1px solid rgba(200,169,110,0.2)',
+              borderRadius: 8, padding: '14px 16px', marginBottom: 16,
+            }}>
+              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginBottom: 6 }}>IN PROGRESS</div>
+              <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 14, marginBottom: 10 }}>{resumableSession.business_name}</div>
+              <button
+                onClick={() => resumeSession(resumableSession)}
+                style={{
+                  width: '100%', background: '#1A1A12', border: '1px solid rgba(200,169,110,0.25)',
+                  borderRadius: 6, padding: '10px', color: '#C8A96E',
+                  fontFamily: 'monospace', fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                ↩ Continue this interview
+              </button>
+            </div>
+          )}
+
+          {!showSignIn ? (
+            <>
+              <input
+                placeholder="What's your business called?"
+                value={businessName}
+                onChange={e => setBusinessName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && startSession()}
+                style={inputStyle}
+              />
+              <button onClick={startSession} style={{
+                width: '100%', background: '#C8A96E', border: 'none', borderRadius: 6,
+                padding: '14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 14,
+                fontWeight: 500, cursor: 'pointer', marginBottom: 12,
+              }}>
+                Start →
+              </button>
+              {!user && (
+                <button
+                  onClick={() => setShowSignIn(true)}
+                  style={{
+                    width: '100%', background: 'transparent', border: '1px solid #1E1E14',
+                    borderRadius: 6, padding: '11px', color: '#4A4A38',
+                    fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  ↩ Continue where you left off
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>SIGN IN TO RESUME</div>
+              {authError && (
+                <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>{authError}</div>
+              )}
+              <input
+                placeholder="Email"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                style={inputStyle}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSignIn()}
+                style={inputStyle}
+              />
+              <button onClick={handleSignIn} disabled={authLoading} style={authButtonPrimary(authLoading)}>
+                {authLoading ? 'Signing in...' : 'Sign in →'}
+              </button>
+              <button
+                onClick={() => { setShowSignIn(false); setAuthError(''); setAuthEmail(''); setAuthPassword('') }}
+                style={{
+                  width: '100%', background: 'transparent', border: 'none',
+                  padding: '8px', color: '#3A3A28', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ─── CLASSIFYING ─────────────────────────────────────────────────────────────
+
+  if (phase === 'classifying') {
+    return (
+      <div style={{ minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', padding: '0 20px' }}>
+          <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, marginBottom: 8 }}>Analysing your business...</div>
+          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>Personalising the interview for you</div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── SAVE PROMPT ─────────────────────────────────────────────────────────────
+
+  if (phase === 'save-prompt') {
+    return (
+      <div style={{
+        minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
+      }}>
+        <div style={{
+          background: '#111110', border: '1px solid #222218', borderRadius: 12,
+          padding: '32px 28px', width: '100%', maxWidth: 420,
+        }}>
+          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BEFORE WE DIVE IN</div>
+          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 10 }}>This takes 1–1.5 hours</h2>
+          <p style={{ color: '#7A7A5A', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.7, marginBottom: 24 }}>
+            Going deep is the only way to get a real picture. Create a free account to save your progress as you go — pick up anytime, on any device.<br /><br />
+            Bugs happen. Don't lose your work.
+          </p>
+
+          {authError && (
+            <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>
+          )}
+
+          <input
+            placeholder="Email"
+            value={authEmail}
+            onChange={e => setAuthEmail(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            type="password"
+            placeholder="Password (min. 6 characters)"
+            value={authPassword}
+            onChange={e => setAuthPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSignUp()}
+            style={inputStyle}
+          />
+          <button onClick={handleSignUp} disabled={authLoading} style={authButtonPrimary(authLoading)}>
+            {authLoading ? 'Creating account...' : 'Create account & save progress →'}
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
+            <div style={{ flex: 1, height: 1, background: '#1A1A14' }} />
+            <span style={{ color: '#2E2E20', fontFamily: 'monospace', fontSize: 11 }}>or</span>
+            <div style={{ flex: 1, height: 1, background: '#1A1A14' }} />
+          </div>
+
+          <button
+            onClick={proceedToInterview}
+            style={{
+              width: '100%', background: 'transparent', border: '1px solid #1A1A14',
+              borderRadius: 6, padding: '11px 14px', color: '#3A3A28',
+              fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', lineHeight: 1.6,
+              textAlign: 'center' as const,
+            }}
+          >
+            Skip for now
+            <div style={{ fontSize: 10, color: '#252518', marginTop: 2 }}>Progress may be lost if the page closes or an error occurs</div>
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── INTERVIEW ───────────────────────────────────────────────────────────────
 
   return (
     <div style={{
@@ -428,6 +715,15 @@ export default function InterviewPage() {
             borderRadius: 4, padding: '2px 7px',
           }}>
             {profile.industry} · {profile.business_type}
+          </span>
+        )}
+        {user && (
+          <span style={{
+            fontSize: 10, fontFamily: 'monospace', color: '#4A6A4A',
+            background: '#101410', border: '1px solid #1A2A1A',
+            borderRadius: 4, padding: '2px 7px',
+          }}>
+            ✓ saving
           </span>
         )}
         {phase === 'interview' && (
