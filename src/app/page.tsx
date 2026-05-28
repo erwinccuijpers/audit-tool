@@ -561,16 +561,20 @@ export default function InterviewPage() {
 
   const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
 
-  // Build ordered category list from filtered questions
-  type CatInfo = { name: string; startIdx: number; endIdx: number }
+  // Build deduplicated category list — each unique category appears once, tracking all its indices
+  type CatInfo = { name: string; minIdx: number; maxIdx: number }
   const categoryFlow: CatInfo[] = []
   if (questions.length > 0) {
+    const seen = new Map<string, CatInfo>()
     questions.forEach((q, i) => {
-      const last = categoryFlow[categoryFlow.length - 1]
-      if (!last || last.name !== q.category) {
-        categoryFlow.push({ name: q.category, startIdx: i, endIdx: i })
+      if (!q.category) return
+      const existing = seen.get(q.category)
+      if (existing) {
+        existing.maxIdx = i
       } else {
-        last.endIdx = i
+        const entry = { name: q.category, minIdx: i, maxIdx: i }
+        seen.set(q.category, entry)
+        categoryFlow.push(entry)
       }
     })
   }
@@ -852,8 +856,8 @@ export default function InterviewPage() {
           flexShrink: 0, alignItems: 'center',
         }}>
           {categoryFlow.map((cat, i) => {
-            const isDone = qIndex > cat.endIdx
-            const isCurrent = qIndex >= cat.startIdx && qIndex <= cat.endIdx
+            const isDone = qIndex > cat.maxIdx
+            const isCurrent = questions[qIndex]?.category === cat.name
             return (
               <span key={i} style={{
                 fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.06em',
