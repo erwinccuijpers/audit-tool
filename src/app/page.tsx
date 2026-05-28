@@ -75,6 +75,10 @@ export default function InterviewPage() {
   const [user, setUser] = useState<any>(null)
   const [resumableSession, setResumableSession] = useState<any>(null)
   const [showSignIn, setShowSignIn] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false)
+  const [showSetNewPassword, setShowSetNewPassword] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
@@ -98,8 +102,9 @@ export default function InterviewPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user ?? null))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null)
+      if (event === 'PASSWORD_RECOVERY') setShowSetNewPassword(true)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -242,6 +247,26 @@ export default function InterviewPage() {
     setAuthLoading(false)
   }
 
+  async function handleForgotPassword() {
+    setAuthLoading(true)
+    setAuthError('')
+    const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
+      redirectTo: 'https://pocketcmo.pro',
+    })
+    if (error) { setAuthError(error.message) } else { setForgotPasswordSent(true) }
+    setAuthLoading(false)
+  }
+
+  async function handleSetNewPassword() {
+    setAuthLoading(true)
+    setAuthError('')
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) { setAuthError(error.message); setAuthLoading(false); return }
+    setShowSetNewPassword(false)
+    setNewPassword('')
+    setAuthLoading(false)
+  }
+
   async function resumeSession(session: any) {
     setSessionId(session.id)
     setBusinessName(session.business_name)
@@ -261,31 +286,69 @@ export default function InterviewPage() {
       return q.applies_to.includes(session.business_type) || q.applies_to.includes('all')
     })
     setQuestions(filtered)
-    setCompletedSummaries(session.completed_summaries || [])
-    const qIdx = Math.min(session.current_q_index || 0, Math.max(0, filtered.length - 1))
+
+    const summaries = session.completed_summaries || []
+    setCompletedSummaries(summaries)
+
+    // Use the higher of stored index or number of completed summaries (handles legacy sessions)
+    const qIdx = Math.min(
+      Math.max(session.current_q_index || 0, summaries.length),
+      Math.max(0, filtered.length - 1)
+    )
     setQIndex(qIdx)
+
     const currentQ = filtered[qIdx]
     let resumeConv: Message[] = []
+
+    // Try to load full conversation from current question's saved response
     if (currentQ) {
-      const { data: resp } = await supabase
+      const { data: currentResp } = await supabase
         .from('responses')
         .select('conversation')
         .eq('session_id', session.id)
         .eq('question_id', currentQ.id)
         .single()
-      if (resp && resp.conversation && resp.conversation.length > 0) {
+
+      if (currentResp && currentResp.conversation && currentResp.conversation.length > 0) {
         resumeConv = [
-          ...resp.conversation,
+          ...currentResp.conversation,
           { role: 'assistant' as const, content: `Welcome back. Let's continue.` },
         ]
       }
     }
+
+    // If current question has no history yet, load from the previous completed question
+    // (each saved conversation contains the full chat history up to that point)
+    if (resumeConv.length === 0 && qIdx > 0) {
+      const prevQ = filtered[qIdx - 1]
+      if (prevQ) {
+        const { data: prevResp } = await supabase
+          .from('responses')
+          .select('conversation')
+          .eq('session_id', session.id)
+          .eq('question_id', prevQ.id)
+          .single()
+
+        if (prevResp && prevResp.conversation && prevResp.conversation.length > 0) {
+          resumeConv = [
+            ...prevResp.conversation,
+            {
+              role: 'assistant' as const,
+              content: `Welcome back. Let's pick up where we left off.\n\n${currentQ?.core_question || ''}`,
+            },
+          ]
+        }
+      }
+    }
+
+    // Final fallback
     if (resumeConv.length === 0 && currentQ) {
       resumeConv = [{
         role: 'assistant' as const,
-        content: `Welcome back to ${session.business_name}. Let's pick up where we left off.\n\n${currentQ.core_question}`,
+        content: `Welcome back to ${session.business_name}. Let's continue.\n\n${currentQ.core_question}`,
       }]
     }
+
     setConversation(resumeConv)
     setPhase('interview')
     setShowSignIn(false)
@@ -494,33 +557,84 @@ export default function InterviewPage() {
     setAiError(false)
   }
 
+  // ─── DERIVED ─────────────────────────────────────────────────────────────────
+
   const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
 
-  const inputStyle = {
-    width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
-    padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
-    outline: 'none', marginBottom: 10, boxSizing: 'border-box' as const,
+  // Build ordered category list from filtered questions
+  type CatInfo = { name: string; startIdx: number; endIdx: number }
+  const categoryFlow: CatInfo[] = []
+  if (questions.length > 0) {
+    questions.forEach((q, i) => {
+      const last = categoryFlow[categoryFlow.length - 1]
+      if (!last || last.name !== q.category) {
+        categoryFlow.push({ name: q.category, startIdx: i, endIdx: i })
+      } else {
+        last.endIdx = i
+      }
+    })
   }
 
-  const authButtonPrimary = (disabled: boolean) => ({
+  // ─── SHARED STYLES ────────────────────────────────────────────────────────────
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
+    padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
+    outline: 'none', marginBottom: 10, boxSizing: 'border-box',
+  }
+
+  const primaryBtn = (disabled: boolean): React.CSSProperties => ({
     width: '100%', background: disabled ? '#1A1A14' : '#C8A96E', border: 'none', borderRadius: 6,
     padding: '13px', color: disabled ? '#4A4A38' : '#0C0C09', fontFamily: 'monospace', fontSize: 14,
-    fontWeight: 500, cursor: disabled ? 'not-allowed' as const : 'pointer' as const,
-    opacity: disabled ? 0.7 : 1, marginBottom: 10,
+    fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1, marginBottom: 10,
   })
+
+  const ghostBtn: React.CSSProperties = {
+    width: '100%', background: 'transparent', border: 'none',
+    padding: '8px', color: '#3A3A28', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+  }
+
+  const cardWrap: React.CSSProperties = {
+    minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
+  }
+
+  const card: React.CSSProperties = {
+    background: '#111110', border: '1px solid #222218', borderRadius: 12,
+    padding: '32px 28px', width: '100%', maxWidth: 420,
+  }
+
+  // ─── SET NEW PASSWORD (after clicking reset link in email) ────────────────────
+
+  if (showSetNewPassword) {
+    return (
+      <div style={cardWrap}>
+        <div style={card}>
+          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ACCOUNT</div>
+          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 20 }}>Set a new password</h2>
+          {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }}>{authError}</div>}
+          <input
+            type="password"
+            placeholder="New password (min. 6 characters)"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSetNewPassword()}
+            style={inputStyle}
+          />
+          <button onClick={handleSetNewPassword} disabled={authLoading || newPassword.length < 6} style={primaryBtn(authLoading || newPassword.length < 6)}>
+            {authLoading ? 'Saving...' : 'Set password →'}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // ─── START SCREEN ────────────────────────────────────────────────────────────
 
   if (phase === 'start') {
     return (
-      <div style={{
-        minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
-      }}>
-        <div style={{
-          background: '#111110', border: '1px solid #222218', borderRadius: 12,
-          padding: '32px 28px', width: '100%', maxWidth: 420,
-        }}>
+      <div style={cardWrap}>
+        <div style={card}>
           <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
           <h1 style={{ color: '#E8E0D0', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
           <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 28, lineHeight: 1.6 }}>
@@ -556,38 +670,42 @@ export default function InterviewPage() {
                 onKeyDown={e => e.key === 'Enter' && startSession()}
                 style={inputStyle}
               />
-              <button onClick={startSession} style={{
-                width: '100%', background: '#C8A96E', border: 'none', borderRadius: 6,
-                padding: '14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 14,
-                fontWeight: 500, cursor: 'pointer', marginBottom: 12,
-              }}>
-                Start →
-              </button>
+              <button onClick={startSession} style={primaryBtn(false)}>Start →</button>
               {!user && (
-                <button
-                  onClick={() => setShowSignIn(true)}
-                  style={{
-                    width: '100%', background: 'transparent', border: '1px solid #1E1E14',
-                    borderRadius: 6, padding: '11px', color: '#4A4A38',
-                    fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
-                  }}
-                >
+                <button onClick={() => setShowSignIn(true)} style={{
+                  width: '100%', background: 'transparent', border: '1px solid #1E1E14',
+                  borderRadius: 6, padding: '11px', color: '#4A4A38',
+                  fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+                }}>
                   ↩ Continue where you left off
                 </button>
               )}
             </>
+          ) : showForgotPassword ? (
+            <>
+              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>RESET PASSWORD</div>
+              {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
+              {forgotPasswordSent ? (
+                <div style={{ color: '#7A9A7A', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
+                  Check your email — we've sent a reset link.
+                </div>
+              ) : (
+                <>
+                  <input placeholder="Your email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
+                  <button onClick={handleForgotPassword} disabled={authLoading} style={primaryBtn(authLoading)}>
+                    {authLoading ? 'Sending...' : 'Send reset link →'}
+                  </button>
+                </>
+              )}
+              <button onClick={() => { setShowForgotPassword(false); setForgotPasswordSent(false); setAuthError('') }} style={ghostBtn}>
+                ← Back to sign in
+              </button>
+            </>
           ) : (
             <>
               <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>SIGN IN TO RESUME</div>
-              {authError && (
-                <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>{authError}</div>
-              )}
-              <input
-                placeholder="Email"
-                value={authEmail}
-                onChange={e => setAuthEmail(e.target.value)}
-                style={inputStyle}
-              />
+              {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>{authError}</div>}
+              <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
               <input
                 type="password"
                 placeholder="Password"
@@ -596,15 +714,18 @@ export default function InterviewPage() {
                 onKeyDown={e => e.key === 'Enter' && handleSignIn()}
                 style={inputStyle}
               />
-              <button onClick={handleSignIn} disabled={authLoading} style={authButtonPrimary(authLoading)}>
+              <button onClick={handleSignIn} disabled={authLoading} style={primaryBtn(authLoading)}>
                 {authLoading ? 'Signing in...' : 'Sign in →'}
               </button>
               <button
-                onClick={() => { setShowSignIn(false); setAuthError(''); setAuthEmail(''); setAuthPassword('') }}
-                style={{
-                  width: '100%', background: 'transparent', border: 'none',
-                  padding: '8px', color: '#3A3A28', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
-                }}
+                onClick={() => { setShowForgotPassword(true); setAuthError('') }}
+                style={{ ...ghostBtn, marginBottom: 4 }}
+              >
+                Forgot password?
+              </button>
+              <button
+                onClick={() => { setShowSignIn(false); setShowForgotPassword(false); setAuthError(''); setAuthEmail(''); setAuthPassword('') }}
+                style={ghostBtn}
               >
                 Cancel
               </button>
@@ -632,14 +753,8 @@ export default function InterviewPage() {
 
   if (phase === 'save-prompt') {
     return (
-      <div style={{
-        minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
-      }}>
-        <div style={{
-          background: '#111110', border: '1px solid #222218', borderRadius: 12,
-          padding: '32px 28px', width: '100%', maxWidth: 420,
-        }}>
+      <div style={cardWrap}>
+        <div style={card}>
           <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BEFORE WE DIVE IN</div>
           <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 10 }}>This takes 1–1.5 hours</h2>
           <p style={{ color: '#7A7A5A', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.7, marginBottom: 24 }}>
@@ -647,16 +762,9 @@ export default function InterviewPage() {
             Bugs happen. Don't lose your work.
           </p>
 
-          {authError && (
-            <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>
-          )}
+          {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>}
 
-          <input
-            placeholder="Email"
-            value={authEmail}
-            onChange={e => setAuthEmail(e.target.value)}
-            style={inputStyle}
-          />
+          <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
           <input
             type="password"
             placeholder="Password (min. 6 characters)"
@@ -665,7 +773,7 @@ export default function InterviewPage() {
             onKeyDown={e => e.key === 'Enter' && handleSignUp()}
             style={inputStyle}
           />
-          <button onClick={handleSignUp} disabled={authLoading} style={authButtonPrimary(authLoading)}>
+          <button onClick={handleSignUp} disabled={authLoading} style={primaryBtn(authLoading)}>
             {authLoading ? 'Creating account...' : 'Create account & save progress →'}
           </button>
 
@@ -681,7 +789,7 @@ export default function InterviewPage() {
               width: '100%', background: 'transparent', border: '1px solid #1A1A14',
               borderRadius: 6, padding: '11px 14px', color: '#3A3A28',
               fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', lineHeight: 1.6,
-              textAlign: 'center' as const,
+              textAlign: 'center',
             }}
           >
             Skip for now
@@ -696,17 +804,17 @@ export default function InterviewPage() {
 
   return (
     <div style={{
-      height: '100dvh',
-      background: '#0C0C09', display: 'flex', flexDirection: 'column',
+      height: '100dvh', background: '#0C0C09', display: 'flex', flexDirection: 'column',
       fontFamily: 'Georgia, serif', overflow: 'hidden',
     }}>
+
       {/* Header */}
       <div style={{
         background: '#0F0F0B', borderBottom: '1px solid #1A1A14',
         padding: '10px 16px', display: 'flex', alignItems: 'center',
         gap: 10, flexShrink: 0, flexWrap: 'wrap',
       }}>
-        <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.1em' }}>BUSINESS AUDIT</span>
+        <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.1em' }}>POCKET CMO</span>
         <span style={{ color: '#C8A96E', fontSize: 12, fontFamily: 'monospace' }}>{businessName}</span>
         {profile && (
           <span style={{
@@ -736,13 +844,38 @@ export default function InterviewPage() {
         )}
       </div>
 
+      {/* Category flow strip */}
+      {phase === 'interview' && categoryFlow.length > 1 && (
+        <div style={{
+          background: '#0A0A07', borderBottom: '1px solid #111110',
+          padding: '6px 16px', display: 'flex', gap: 4, overflowX: 'auto',
+          flexShrink: 0, alignItems: 'center',
+        }}>
+          {categoryFlow.map((cat, i) => {
+            const isDone = qIndex > cat.endIdx
+            const isCurrent = qIndex >= cat.startIdx && qIndex <= cat.endIdx
+            return (
+              <span key={i} style={{
+                fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.06em',
+                padding: '3px 8px', borderRadius: 3, whiteSpace: 'nowrap',
+                color: isDone ? '#4A4A38' : isCurrent ? '#C8A96E' : '#222218',
+                background: isCurrent ? 'rgba(200,169,110,0.07)' : 'transparent',
+                border: `1px solid ${isCurrent ? 'rgba(200,169,110,0.18)' : '#161612'}`,
+                transition: 'all 0.3s',
+              }}>
+                {isDone ? '✓ ' : ''}{cat.name.toUpperCase()}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
           {conversation.map((msg, i) => (
             <div key={i} style={{
-              marginBottom: 16,
-              display: 'flex',
+              marginBottom: 16, display: 'flex',
               justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             }}>
               <div style={{
@@ -750,12 +883,8 @@ export default function InterviewPage() {
                 background: msg.role === 'user' ? '#1A1A12' : '#111110',
                 border: `1px solid ${msg.role === 'user' ? '#2A2A1E' : '#1A1A14'}`,
                 borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                padding: '12px 16px',
-                color: '#D0C8B8',
-                fontSize: 15,
-                lineHeight: 1.65,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                padding: '12px 16px', color: '#D0C8B8', fontSize: 15,
+                lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               }}>
                 {msg.content}
               </div>
@@ -763,15 +892,11 @@ export default function InterviewPage() {
           ))}
           {loading && !aiError && (
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
-              <div style={{
-                background: '#111110', border: '1px solid #1A1A14',
-                borderRadius: '16px 16px 16px 4px', padding: '12px 16px',
-              }}>
+              <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: '16px 16px 16px 4px', padding: '12px 16px' }}>
                 <span style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 12 }}>thinking...</span>
               </div>
             </div>
           )}
-
           {aiError && (
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
               <div style={{
@@ -782,16 +907,11 @@ export default function InterviewPage() {
                 <span style={{ color: '#9A8060', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.55 }}>
                   Sorry — that took longer than expected. Your answers are saved. Pick up right where you left off.
                 </span>
-                <button
-                  onClick={retryLastMessage}
-                  style={{
-                    alignSelf: 'flex-start',
-                    background: '#C8A96E', border: 'none', borderRadius: 6,
-                    padding: '7px 14px', color: '#0C0C09',
-                    fontFamily: 'monospace', fontSize: 12, fontWeight: 500,
-                    cursor: 'pointer', letterSpacing: '0.03em',
-                  }}
-                >
+                <button onClick={retryLastMessage} style={{
+                  alignSelf: 'flex-start', background: '#C8A96E', border: 'none', borderRadius: 6,
+                  padding: '7px 14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 12,
+                  fontWeight: 500, cursor: 'pointer', letterSpacing: '0.03em',
+                }}>
                   ↩ Continue where I left off
                 </button>
               </div>
@@ -808,19 +928,13 @@ export default function InterviewPage() {
 
       {/* Input */}
       {(phase === 'intro' || phase === 'interview') && (
-        <div style={{
-          borderTop: '1px solid #1A1A14', padding: '12px 16px',
-          background: '#0F0F0B', flexShrink: 0,
-        }}>
+        <div style={{ borderTop: '1px solid #1A1A14', padding: '12px 16px', background: '#0F0F0B', flexShrink: 0 }}>
           <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', gap: 8 }}>
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  send()
-                }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
               }}
               placeholder="Type your answer..."
               rows={2}
