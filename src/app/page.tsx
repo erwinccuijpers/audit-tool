@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import SideNav from '@/components/SideNav'
 
 type Question = {
   id: string
@@ -807,8 +808,10 @@ export default function InterviewPage() {
   // ─── INTERVIEW ───────────────────────────────────────────────────────────────
 
   return (
+    <div style={{ display: 'flex', height: '100dvh', overflow: 'hidden' }}>
+    <SideNav sessionId={sessionId || undefined} />
     <div style={{
-      height: '100dvh', background: '#0C0C09', display: 'flex', flexDirection: 'column',
+      flex: 1, minWidth: 0, background: '#0C0C09', display: 'flex', flexDirection: 'column',
       fontFamily: 'Georgia, serif', overflow: 'hidden',
     }}>
 
@@ -966,6 +969,7 @@ export default function InterviewPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }
