@@ -197,7 +197,7 @@ export default function InterviewPage() {
       ? `You have a hunch something's off — let's dig into where exactly.`
       : `Let's map out the full picture and find where the opportunities are hiding.`
 
-    const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex things are, this usually takes between 10 and 20 minutes. Some questions will feel obvious, some might surprise you. Just answer honestly.\n\n${filtered[0].core_question}`
+    const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${filtered[0].core_question}`
 
     setInterviewTransition(transition)
 
