@@ -15,6 +15,8 @@ type Session = {
   current_q_index: number
   completed_summaries: { question: string; summary: string }[]
   created_at: string
+  user_id?: string | null
+  admin_analysis?: any
 }
 
 type Message = { role: 'user' | 'assistant'; content: string }
@@ -236,13 +238,150 @@ function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmai
   )
 }
 
+function FunnelView({ sessions }: { sessions: Session[] }) {
+  const total = sessions.length
+  const anyActivity = sessions.filter(s => (s.current_q_index || 0) > 0).length
+  const reachedQ6 = sessions.filter(s => (s.current_q_index || 0) >= 6).length
+  const hasSummaries = sessions.filter(s => (s.completed_summaries || []).length > 0).length
+  const completed = sessions.filter(s => s.status === 'completed').length
+  const authenticated = sessions.filter(s => s.user_id != null).length
+  const anonymous = sessions.filter(s => s.user_id == null).length
+
+  // Drop-off distribution: bucket current_q_index into ranges
+  const buckets = [
+    { label: '0 (never started)', min: 0, max: 0 },
+    { label: 'Q1–5 (early drop)', min: 1, max: 5 },
+    { label: 'Q6–10', min: 6, max: 10 },
+    { label: 'Q11–20', min: 11, max: 20 },
+    { label: 'Q21–30', min: 21, max: 30 },
+    { label: 'Q31+ (deep)', min: 31, max: 999 },
+  ]
+  const bucketCounts = buckets.map(b => ({
+    ...b,
+    count: sessions.filter(s => {
+      const qi = s.current_q_index || 0
+      return qi >= b.min && qi <= b.max
+    }).length,
+    authed: sessions.filter(s => {
+      const qi = s.current_q_index || 0
+      return qi >= b.min && qi <= b.max && s.user_id != null
+    }).length,
+  }))
+
+  const maxBucket = Math.max(...bucketCounts.map(b => b.count), 1)
+
+  function FunnelRow({ label: lbl, value, total: tot, note }: { label: string; value: number; total: number; note?: string }) {
+    const pct = tot > 0 ? Math.round((value / tot) * 100) : 0
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <div style={{ width: 160, color: '#6A6A52', ...mono, fontSize: 11, flexShrink: 0 }}>{lbl}</div>
+        <div style={{ flex: 1, height: 6, background: '#1A1A14', borderRadius: 3 }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#C8A96E', borderRadius: 3, transition: 'width 0.4s ease' }} />
+        </div>
+        <div style={{ width: 56, textAlign: 'right', ...mono, fontSize: 11, color: '#D0C8B8', flexShrink: 0 }}>{value}</div>
+        <div style={{ width: 36, textAlign: 'right', ...mono, fontSize: 10, color: '#3A3A28', flexShrink: 0 }}>{pct}%</div>
+        {note && <div style={{ ...mono, fontSize: 10, color: '#3A3A28' }}>{note}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Summary stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+        {[
+          { label: 'TOTAL SESSIONS', value: total },
+          { label: 'AUTHENTICATED', value: authenticated },
+          { label: 'ANONYMOUS', value: anonymous },
+          { label: 'WITH SUMMARIES', value: hasSummaries },
+          { label: 'COMPLETED', value: completed },
+        ].map(({ label: lbl, value }) => (
+          <div key={lbl} style={card({ textAlign: 'center', padding: '14px 12px' })}>
+            <div style={{ color: '#D0C8B8', fontFamily: 'monospace', fontSize: 22, fontWeight: 300, marginBottom: 4 }}>{value}</div>
+            <div style={{ ...label(), fontSize: 9 }}>{lbl}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Conversion funnel */}
+      <div style={card()}>
+        <SectionLabel>CONVERSION FUNNEL</SectionLabel>
+        <FunnelRow label="Sessions started" value={total} total={total} />
+        <FunnelRow label="Any activity" value={anyActivity} total={total} />
+        <FunnelRow label="Reached Q6 (save prompt)" value={reachedQ6} total={total} />
+        <FunnelRow label="Has summaries" value={hasSummaries} total={total} />
+        <FunnelRow label="Completed" value={completed} total={total} />
+      </div>
+
+      {/* Auth breakdown */}
+      <div style={card()}>
+        <SectionLabel>AUTH BREAKDOWN</SectionLabel>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={{ flex: authenticated, height: 10, background: '#4A6A4A', borderRadius: '3px 0 0 3px', minWidth: 2 }} />
+          <div style={{ flex: anonymous, height: 10, background: '#5A3A28', borderRadius: '0 3px 3px 0', minWidth: 2 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 20 }}>
+          <span style={{ ...mono, fontSize: 11, color: '#7AAA7A' }}>{authenticated} authenticated ({total > 0 ? Math.round(authenticated / total * 100) : 0}%)</span>
+          <span style={{ ...mono, fontSize: 11, color: '#C07050' }}>{anonymous} anonymous ({total > 0 ? Math.round(anonymous / total * 100) : 0}%)</span>
+        </div>
+      </div>
+
+      {/* Drop-off distribution */}
+      <div style={card()}>
+        <SectionLabel>DROP-OFF BY QUESTION</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {bucketCounts.map(b => (
+            <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 180, ...mono, fontSize: 10, color: '#4A4A38', flexShrink: 0 }}>{b.label}</div>
+              <div style={{ flex: 1, height: 16, background: '#111110', borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.round((b.count / maxBucket) * 100)}%`,
+                  height: '100%',
+                  background: '#1E1E14',
+                  borderRadius: 3,
+                  position: 'absolute',
+                }} />
+                <div style={{
+                  width: `${Math.round((b.authed / maxBucket) * 100)}%`,
+                  height: '100%',
+                  background: '#2A3A2A',
+                  borderRadius: 3,
+                  position: 'absolute',
+                }} />
+              </div>
+              <div style={{ ...mono, fontSize: 11, color: '#D0C8B8', width: 28, textAlign: 'right', flexShrink: 0 }}>{b.count}</div>
+              <div style={{ ...mono, fontSize: 10, color: '#3A4A3A', width: 28, textAlign: 'right', flexShrink: 0 }}>{b.authed}✓</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 16 }}>
+          <span style={{ ...mono, fontSize: 9, color: '#2A2A20' }}>■ total sessions</span>
+          <span style={{ ...mono, fontSize: 9, color: '#2A3A2A' }}>■ authenticated only</span>
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
+type RawResponse = {
+  question_id: string
+  conversation: { role: string; content: string }[]
+  updated_at: string
+}
+
 function ClientCard({ session, adminEmail, allSessions }: { session: Session; adminEmail: string; allSessions: Session[] }) {
   const [expanded, setExpanded] = useState(false)
-  const [analysis, setAnalysis] = useState<any>((session as any).admin_analysis || null)
+  const [analysis, setAnalysis] = useState<any>(session.admin_analysis || null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [rawResponses, setRawResponses] = useState<RawResponse[] | null>(null)
+  const [rawLoading, setRawLoading] = useState(false)
 
   const summaryCount = (session.completed_summaries || []).length
   const pct = session.current_q_index ? Math.round((session.current_q_index / 35) * 100) : 0
+  const isAnon = session.user_id == null
+  const hasActivity = (session.current_q_index || 0) > 0
 
   async function analyse() {
     setAnalysisLoading(true)
@@ -253,9 +392,20 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
     })
     const data = await res.json()
     setAnalysis(data.result)
-    // Save to session row
     await supabase.from('sessions').update({ admin_analysis: data.result }).eq('id', session.id)
     setAnalysisLoading(false)
+  }
+
+  async function loadRawResponses() {
+    setRawLoading(true)
+    const { data, error } = await supabase
+      .from('responses')
+      .select('question_id, conversation, updated_at')
+      .eq('session_id', session.id)
+      .order('updated_at', { ascending: true })
+    if (error) console.error('loadRawResponses:', error.message)
+    setRawResponses((data as RawResponse[]) || [])
+    setRawLoading(false)
   }
 
   return (
@@ -265,13 +415,18 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
         style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
       >
         <div style={{ flex: 1 }}>
-          <span style={{ color: '#D0C8B8', ...mono, fontSize: 13 }}>{session.business_name}</span>
+          <span style={{ color: '#D0C8B8', ...mono, fontSize: 13 }}>
+            {session.business_name || <span style={{ color: '#3A3A28' }}>(no name)</span>}
+          </span>
           {session.business_type && (
             <span style={{ ...mono, fontSize: 10, color: '#3A3A28', marginLeft: 8 }}>
               {session.business_type} · {session.industry}
             </span>
           )}
         </div>
+        {isAnon && (
+          <span style={tag('#7A5A38', '#100C06')}>ANON</span>
+        )}
         <span style={tag(session.status === 'completed' ? '#7AAA7A' : '#8A6A30', session.status === 'completed' ? '#0A120A' : '#120E08')}>
           {session.status}
         </span>
@@ -283,9 +438,59 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
       <div style={{ marginTop: 8, height: 2, background: '#1A1A14', borderRadius: 1 }}>
         <div style={{ width: `${pct}%`, height: '100%', background: '#2A2A1E', borderRadius: 1 }} />
       </div>
+      {hasActivity && (
+        <div style={{ ...mono, fontSize: 9, color: '#2A2A1E', marginTop: 3 }}>Q{session.current_q_index} reached</div>
+      )}
 
       {expanded && (
         <div style={{ marginTop: 16 }}>
+
+          {/* Sessions with no summaries: load raw responses */}
+          {summaryCount === 0 && (
+            <div style={{ marginBottom: 16 }}>
+              {rawResponses === null ? (
+                <button
+                  onClick={e => { e.stopPropagation(); loadRawResponses() }}
+                  disabled={rawLoading}
+                  style={{
+                    background: '#1A1410', border: '1px solid rgba(122,90,32,0.3)', borderRadius: 6,
+                    padding: '8px 16px', color: rawLoading ? '#3A3A28' : '#8A6A40',
+                    ...mono, fontSize: 11, cursor: rawLoading ? 'default' : 'pointer',
+                  }}
+                >
+                  {rawLoading ? 'Loading...' : '↓ Load raw responses'}
+                </button>
+              ) : rawResponses.length === 0 ? (
+                <div style={{ color: '#3A3A28', ...mono, fontSize: 11 }}>No saved responses found.</div>
+              ) : (
+                <div>
+                  <SectionLabel>{`RAW RESPONSES (${rawResponses.length})`}</SectionLabel>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {rawResponses.map((r, i) => {
+                      const conv = r.conversation || []
+                      // First assistant message is usually the question prompt
+                      const firstAssistant = conv.find(m => m.role === 'assistant')
+                      const lastUserMsg = [...conv].reverse().find(m => m.role === 'user')
+                      const qLabel = firstAssistant
+                        ? firstAssistant.content.slice(0, 120) + (firstAssistant.content.length > 120 ? '…' : '')
+                        : r.question_id
+                      return (
+                        <div key={i} style={{ borderLeft: '2px solid #1A1A14', paddingLeft: 10 }}>
+                          <div style={{ color: '#4A4A38', ...mono, fontSize: 10, marginBottom: 3, lineHeight: 1.4 }}>{qLabel}</div>
+                          {lastUserMsg && (
+                            <div style={{ color: '#7A7060', fontSize: 13, lineHeight: 1.5, fontFamily: 'Georgia, serif' }}>
+                              {lastUserMsg.content.slice(0, 400)}{lastUserMsg.content.length > 400 ? '…' : ''}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Summaries */}
           {summaryCount > 0 && (
             <div style={{ marginBottom: 16 }}>
@@ -509,6 +714,89 @@ function ChatView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: s
   )
 }
 
+function FeedbackView() {
+  const [entries, setEntries] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase
+      .from('feedback')
+      .select('id, category, recommendation, feedback_text, created_at, sessions(business_name, business_type, industry)')
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) console.error('FeedbackView:', error.message)
+        setEntries(data || [])
+        setLoading(false)
+      })
+  }, [])
+
+  if (loading) {
+    return <div style={{ color: '#3A3A28', ...mono, fontSize: 12, textAlign: 'center', padding: 40 }}>Loading feedback...</div>
+  }
+
+  if (entries.length === 0) {
+    return <div style={{ color: '#2A2A20', ...mono, fontSize: 12, textAlign: 'center', padding: 40 }}>No feedback submitted yet.</div>
+  }
+
+  // Group by category
+  const grouped = entries.reduce((acc, f) => {
+    const key = f.category || 'Uncategorized'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(f)
+    return acc
+  }, {} as Record<string, any[]>)
+
+  const sortedAreas = Object.entries(grouped).sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>
+        {entries.length} entries · {sortedAreas.length} areas
+      </div>
+
+      {sortedAreas.map(([area, rawItems]) => {
+        const items = rawItems as any[]
+        return (
+        <div key={area} style={card()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ ...label(), flex: 1 }}>{area.toUpperCase()}</div>
+            <span style={tag('#C8A96E', '#120E08')}>{items.length}×</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {(items as any[]).map((f) => {
+              const session = Array.isArray(f.sessions) ? f.sessions[0] : f.sessions
+              return (
+                <div key={f.id} style={{ borderLeft: '2px solid #1A1A14', paddingLeft: 12 }}>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ ...mono, fontSize: 10, color: '#4A4A38' }}>
+                      {session?.business_name || 'Anonymous'}
+                    </span>
+                    {session?.business_type && (
+                      <span style={{ ...mono, fontSize: 9, color: '#2A2A20' }}>{session.business_type}</span>
+                    )}
+                    <span style={{ ...mono, fontSize: 9, color: '#2A2A20', marginLeft: 'auto' }}>
+                      {new Date(f.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  {f.recommendation && (
+                    <div style={{ color: '#2A2A1E', ...mono, fontSize: 10, marginBottom: 5, lineHeight: 1.4 }}>
+                      re: {f.recommendation.slice(0, 120)}{f.recommendation.length > 120 ? '…' : ''}
+                    </div>
+                  )}
+                  <div style={{ color: '#9A9080', fontSize: 13, lineHeight: 1.6, fontFamily: 'Georgia, serif' }}>
+                    {f.feedback_text}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Main admin page ───────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -516,7 +804,7 @@ export default function AdminPage() {
   const [authLoading, setAuthLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'patterns' | 'clients' | 'chat'>('patterns')
+  const [activeTab, setActiveTab] = useState<'funnel' | 'patterns' | 'clients' | 'feedback' | 'chat'>('funnel')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -531,7 +819,7 @@ export default function AdminPage() {
     setSessionsLoading(true)
     supabase
       .from('sessions')
-      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at')
+      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at, user_id')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         setSessions(data || [])
@@ -564,8 +852,10 @@ export default function AdminPage() {
   const withData = sessions.filter(s => (s.completed_summaries || []).length > 0)
 
   const tabs: { key: typeof activeTab; label: string }[] = [
+    { key: 'funnel', label: 'Funnel' },
     { key: 'patterns', label: 'Patterns' },
     { key: 'clients', label: `Clients (${sessions.length})` },
+    { key: 'feedback', label: 'Feedback' },
     { key: 'chat', label: 'Chat' },
   ]
 
@@ -621,6 +911,10 @@ export default function AdminPage() {
           </div>
         ) : (
           <>
+            {activeTab === 'funnel' && (
+              <FunnelView sessions={sessions} />
+            )}
+
             {activeTab === 'patterns' && (
               <PatternsView sessions={sessions} adminEmail={user.email} />
             )}
@@ -648,6 +942,10 @@ export default function AdminPage() {
                   ))
                 )}
               </div>
+            )}
+
+            {activeTab === 'feedback' && (
+              <FeedbackView />
             )}
 
             {activeTab === 'chat' && (

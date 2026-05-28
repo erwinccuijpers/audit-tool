@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-type Summary = { question: string; summary: string }
+type Summary = { question: string; summary: string; data_backed?: boolean | null }
 type CategoryData = { name: string; covered: Summary[]; uncovered: string[] }
 
 export async function POST(req: NextRequest) {
@@ -16,7 +16,10 @@ export async function POST(req: NextRequest) {
   const coveredSection = (categoryData as CategoryData[])
     .filter(c => c.covered.length > 0)
     .map(c =>
-      `### ${c.name}\n${c.covered.map(cv => `  • Q: ${cv.question}\n    Owner: ${cv.summary}`).join('\n')}`
+      `### ${c.name}\n${c.covered.map(cv => {
+        const tag = cv.data_backed === true ? '[DATA-BACKED]' : cv.data_backed === false ? '[GUT FEEL]' : '[UNTAGGED]'
+        return `  • Q: ${cv.question}\n    ${tag} Owner: ${cv.summary}`
+      }).join('\n')}`
     )
     .join('\n\n')
 
@@ -44,7 +47,7 @@ ${uncoveredList || 'All areas covered.'}
 Analyze each of these ${allCategories.length} categories:
 ${allCategories.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
-For each, return a JSON object with:
+For each category return a JSON object with:
 - "category": exact name from the list above
 - "confidence": integer 0–100
     0–25 = no meaningful data from owner
@@ -58,7 +61,13 @@ For each, return a JSON object with:
 
 CRITICAL: Never invent insights. Low-confidence = honest "need more data" response. A truthful assessment beats a polished guess.
 
-Return ONLY a valid JSON array. No markdown, no preamble.`
+Return a JSON object with exactly two keys:
+
+"emerging_picture": A 2–3 sentence honest read of what is already visible from the data collected so far. Name the 1–2 most significant signals or tensions. Be explicit that the picture is still incomplete and will sharpen as more areas are covered. If fewer than 2 areas have data, write a single sentence only. If nothing is covered, return null.
+
+"categories": the array of category objects described above.
+
+Return ONLY valid JSON. No markdown, no preamble.`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -66,15 +75,19 @@ Return ONLY a valid JSON array. No markdown, no preamble.`
     messages: [{ role: 'user', content: prompt }],
   })
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '[]'
+  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}'
 
-  let categories
+  let parsed: any = {}
   try {
-    categories = JSON.parse(raw)
+    parsed = JSON.parse(raw)
   } catch {
-    const match = raw.match(/\[[\s\S]*\]/)
-    try { categories = match ? JSON.parse(match[0]) : [] } catch { categories = [] }
+    const match = raw.match(/\{[\s\S]*\}/)
+    try { parsed = match ? JSON.parse(match[0]) : {} } catch { parsed = {} }
   }
 
-  return NextResponse.json({ categories })
+  // Support both new object shape {emerging_picture, categories} and old bare array
+  const categories = Array.isArray(parsed) ? parsed : (parsed.categories || [])
+  const emerging_picture = Array.isArray(parsed) ? null : (parsed.emerging_picture || null)
+
+  return NextResponse.json({ categories, emerging_picture })
 }

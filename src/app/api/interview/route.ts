@@ -62,7 +62,7 @@ TONE RULES:
 - Never be clinical or formal
 - Never repeat their exact words back at them robotically
 
-WHEN TO MOVE ON (respond with COMPLETE):
+WHEN TO MOVE ON:
 - The topic is genuinely exhausted and you've learned what you need
 - The owner is clearly confident and the answer is complete
 - You've asked 2 follow-ups already on this topic
@@ -72,9 +72,11 @@ WHEN TO MOVE ON (respond with COMPLETE):
 CRITICAL RULES:
 - NEVER quote or repeat the question text from your instructions verbatim — rephrase everything in your own conversational words
 - NEVER show the owner what topics are coming next
-- If you decide to move on, respond with ONLY the word: COMPLETE
 - If you have a follow-up, respond with ONLY that question — no preamble, no "Great answer!", just the question
-- Maximum 3 follow-ups per topic then COMPLETE regardless`
+- Maximum 3 follow-ups per topic then move on regardless
+- When moving on, respond with ONLY one of these two signals (nothing else):
+    COMPLETE|DATA — owner gave concrete, data-backed answers: cited specific numbers, named a tool they actually use, referred to reports or metrics they've actually looked at, gave figures they know for certain
+    COMPLETE|GUT — owner was running on gut feel or estimates: used phrases like "I think", "probably", "I'd say around", "not sure but", gave no specific data sources, or acknowledged it's an assumption`
 
   const messages = conversation.map((msg: { role: string; content: string }) => ({
     role: msg.role as 'user' | 'assistant',
@@ -89,8 +91,11 @@ CRITICAL RULES:
   })
 
   const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
-  const isComplete = raw.trim() === 'COMPLETE' || raw.trim().startsWith('COMPLETE') || raw.trim().endsWith('COMPLETE') || raw.includes('\nCOMPLETE')
+  const isComplete = raw.startsWith('COMPLETE') || raw === 'COMPLETE' || raw.endsWith('COMPLETE') || raw.includes('\nCOMPLETE')
+  const dataBacked: boolean | null = isComplete
+    ? raw.includes('|DATA') ? true : raw.includes('|GUT') ? false : null
+    : null
   const message = isComplete ? '' : raw
 
-  return NextResponse.json({ message, isComplete })
+  return NextResponse.json({ message, isComplete, dataBacked })
 }

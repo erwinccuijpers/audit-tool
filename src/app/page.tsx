@@ -32,6 +32,34 @@ type BusinessProfile = {
 
 type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'done'
 
+type CatInfo = { name: string; minIdx: number; maxIdx: number }
+
+function detectPivotIntent(
+  message: string,
+  catFlow: CatInfo[],
+  currentQIdx: number,
+  qs: Question[]
+): { categoryName: string; firstQIndex: number } | null {
+  const REDIRECT = [
+    "let's focus", "focus on", "let's talk about", "talk about",
+    "let's start with", "start with", "switch to", "move to",
+    "can we discuss", "prioritize", "my main issue", "biggest problem",
+    "main problem", "let's cover", "most important", "start from",
+    "begin with", "tackle first", "actually want to", "can we start with",
+  ]
+  const lower = message.toLowerCase()
+  if (!REDIRECT.some(p => lower.includes(p))) return null
+
+  const target = catFlow.find(cat =>
+    lower.includes(cat.name.toLowerCase()) && cat.minIdx > currentQIdx
+  )
+  if (!target) return null
+
+  const firstQIndex = qs.findIndex((q, i) => i >= target.minIdx && q.category === target.name)
+  if (firstQIndex === -1) return null
+  return { categoryName: target.name, firstQIndex }
+}
+
 const INTRO_OPENER = `Tell me about your business like you're explaining it to someone you just met — what do you do, who do you do it for, and what's the thing you're most proud of?`
 
 const INTRO_FOLLOWUPS = [
@@ -65,7 +93,7 @@ export default function InterviewPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [businessName, setBusinessName] = useState('')
-  const [completedSummaries, setCompletedSummaries] = useState<{ question: string; summary: string }[]>([])
+  const [completedSummaries, setCompletedSummaries] = useState<{ question: string; summary: string; data_backed?: boolean | null }[]>([])
   const [introTurns, setIntroTurns] = useState(0)
   const [transitionCount, setTransitionCount] = useState(0)
   const [aiError, setAiError] = useState(false)
@@ -192,7 +220,18 @@ export default function InterviewPage() {
       return q.applies_to.includes(detectedProfile.business_type) || q.applies_to.includes('all')
     })
 
-    setQuestions(filtered)
+    // Front-load emphasis areas if the owner already named a concern in the intro
+    let orderedQuestions = filtered
+    if (detectedProfile.emphasis_areas?.length > 0) {
+      const empCats = new Set(
+        (detectedProfile.emphasis_areas as string[]).map(a => a.toLowerCase())
+      )
+      const priority = filtered.filter(q => empCats.has((q.category || '').toLowerCase()))
+      const rest = filtered.filter(q => !empCats.has((q.category || '').toLowerCase()))
+      orderedQuestions = [...priority, ...rest]
+    }
+
+    setQuestions(orderedQuestions)
 
     const awarenessLine = detectedProfile.awareness_level === 'knows_the_gap'
       ? `You already have a sense of where the gaps are — let's see if the numbers back that up.`
@@ -200,7 +239,7 @@ export default function InterviewPage() {
       ? `You have a hunch something's off — let's dig into where exactly.`
       : `Let's map out the full picture and find where the opportunities are hiding.`
 
-    const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${filtered[0].core_question}`
+    const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${orderedQuestions[0].core_question}`
 
     setInterviewTransition(transition)
     setConversation(prev => [...prev, { role: 'assistant', content: transition }])
@@ -411,7 +450,7 @@ export default function InterviewPage() {
 
   async function checkIfAlreadyCovered(
     q: Question,
-    summaries: { question: string; summary: string }[]
+    summaries: { question: string; summary: string; data_backed?: boolean | null }[]
   ): Promise<boolean> {
     if (summaries.length === 0) return false
     const res = await fetch('/api/precheck', {
@@ -427,9 +466,47 @@ export default function InterviewPage() {
     return covered === true
   }
 
+  async function handleCategoryPivot(cat: CatInfo) {
+    if (loading || phase !== 'interview') return
+    const firstQIndex = questions.findIndex((q, i) => i >= cat.minIdx && q.category === cat.name)
+    if (firstQIndex === -1 || firstQIndex <= qIndex) return
+    const currentQ = questions[qIndex]
+    await saveResponse(currentQ.id, [])
+    const pivotMsg = `Let's shift to ${cat.name}.\n\n${questions[firstQIndex].core_question}`
+    setConversation(prev => [...prev, { role: 'assistant', content: pivotMsg }])
+    if (sessionId) {
+      await supabase.from('sessions').update({
+        current_q_index: firstQIndex,
+        completed_summaries: completedSummaries,
+      }).eq('id', sessionId)
+    }
+    setQIndex(firstQIndex)
+  }
+
   async function sendInterview(userInput: string) {
     const currentQ = questions[qIndex]
     const userMsg: Message = { role: 'user', content: userInput }
+
+    // Check for pivot intent before hitting the API
+    const pivotTarget = detectPivotIntent(userInput, categoryFlow, qIndex, questions)
+    if (pivotTarget) {
+      setConversation(prev => [...prev, userMsg])
+      setInput('')
+      setLoading(true)
+      await saveResponse(currentQ.id, [])
+      const pivotMsg = `Sure — let's focus on ${pivotTarget.categoryName} first.\n\n${questions[pivotTarget.firstQIndex].core_question}`
+      setConversation(prev => [...prev, { role: 'assistant', content: pivotMsg }])
+      if (sessionId) {
+        await supabase.from('sessions').update({
+          current_q_index: pivotTarget.firstQIndex,
+          completed_summaries: completedSummaries,
+        }).eq('id', sessionId)
+      }
+      setQIndex(pivotTarget.firstQIndex)
+      setLoading(false)
+      return
+    }
+
     const newConv = [...conversation, userMsg]
     setConversation(newConv)
     setInput('')
@@ -447,6 +524,7 @@ export default function InterviewPage() {
 
     let message: string
     let isComplete: boolean
+    let dataBacked: boolean | null = null
 
     try {
       const controller = new AbortController()
@@ -462,6 +540,7 @@ export default function InterviewPage() {
       const data = await res.json()
       message = data.message
       isComplete = data.isComplete
+      dataBacked = data.dataBacked ?? null
     } catch {
       setAiError(true)
       setLoading(false)
@@ -471,7 +550,7 @@ export default function InterviewPage() {
     if (isComplete) {
       await saveResponse(currentQ.id, newConv)
       const ownerReplies = newConv.filter(m => m.role === 'user').map(m => m.content).join(' / ')
-      const newSummary = { question: currentQ.core_question, summary: ownerReplies }
+      const newSummary = { question: currentQ.core_question, summary: ownerReplies, data_backed: dataBacked }
       const updatedSummaries = [...completedSummaries, newSummary]
       setCompletedSummaries(updatedSummaries)
 
@@ -588,7 +667,6 @@ export default function InterviewPage() {
   const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
 
   // Build deduplicated category list — each unique category appears once, tracking all its indices
-  type CatInfo = { name: string; minIdx: number; maxIdx: number }
   const categoryFlow: CatInfo[] = []
   if (questions.length > 0) {
     const seen = new Map<string, CatInfo>()
@@ -847,15 +925,24 @@ export default function InterviewPage() {
           {categoryFlow.map((cat, i) => {
             const isDone = qIndex > cat.maxIdx
             const isCurrent = questions[qIndex]?.category === cat.name
+            const isUpcoming = !isDone && !isCurrent && cat.minIdx > qIndex
             return (
-              <span key={i} style={{
-                fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.06em',
-                padding: '3px 8px', borderRadius: 3, whiteSpace: 'nowrap',
-                color: isDone ? '#4A4A38' : isCurrent ? '#C8A96E' : '#222218',
-                background: isCurrent ? 'rgba(200,169,110,0.07)' : 'transparent',
-                border: `1px solid ${isCurrent ? 'rgba(200,169,110,0.18)' : '#161612'}`,
-                transition: 'all 0.3s',
-              }}>
+              <span
+                key={i}
+                onClick={isUpcoming ? () => handleCategoryPivot(cat) : undefined}
+                title={isUpcoming ? `Jump to ${cat.name}` : undefined}
+                style={{
+                  fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.06em',
+                  padding: '3px 8px', borderRadius: 3, whiteSpace: 'nowrap',
+                  color: isDone ? '#4A4A38' : isCurrent ? '#C8A96E' : isUpcoming ? '#2E2E22' : '#222218',
+                  background: isCurrent ? 'rgba(200,169,110,0.07)' : 'transparent',
+                  border: `1px solid ${isCurrent ? 'rgba(200,169,110,0.18)' : '#161612'}`,
+                  cursor: isUpcoming ? 'pointer' : 'default',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => { if (isUpcoming) (e.currentTarget as HTMLElement).style.color = '#5A5A40' }}
+                onMouseLeave={e => { if (isUpcoming) (e.currentTarget as HTMLElement).style.color = '#2E2E22' }}
+              >
                 {isDone ? '✓ ' : ''}{cat.name.toUpperCase()}
               </span>
             )

@@ -3,6 +3,85 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 
+function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: string; category: string; recommendation: string }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [done, setDone] = useState(false)
+
+  async function submit() {
+    if (!text.trim()) return
+    setLoading(true)
+    await supabase.from('feedback').insert({
+      session_id: sessionId,
+      category,
+      recommendation,
+      feedback_text: text.trim(),
+    })
+    setDone(true)
+    setLoading(false)
+  }
+
+  if (done) {
+    return <div style={{ color: '#4A6A4A', fontFamily: 'monospace', fontSize: 10, marginTop: 10 }}>Feedback received.</div>
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {!open ? (
+        <button
+          onClick={e => { e.stopPropagation(); setOpen(true) }}
+          style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+            color: '#2A2A20', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.08em',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#4A4A38')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#2A2A20')}
+        >
+          + LEAVE FEEDBACK
+        </button>
+      ) : (
+        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Is this recommendation accurate? Anything we missed?"
+            rows={3}
+            autoFocus
+            style={{
+              background: '#0C0C09', border: '1px solid #1E1E14', borderRadius: 6,
+              padding: '8px 10px', color: '#D0C8B8', fontFamily: 'monospace',
+              fontSize: 11, outline: 'none', resize: 'none', lineHeight: 1.5,
+              width: '100%', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={submit}
+              disabled={!text.trim() || loading}
+              style={{
+                background: !text.trim() || loading ? '#1A1A14' : '#C8A96E',
+                border: 'none', borderRadius: 5, padding: '6px 14px',
+                color: !text.trim() || loading ? '#3A3A28' : '#0C0C09',
+                fontFamily: 'monospace', fontSize: 11,
+                cursor: !text.trim() || loading ? 'default' : 'pointer',
+              }}
+            >
+              {loading ? 'Saving...' : 'Submit'}
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              style={{ background: 'none', border: 'none', color: '#2A2A20', fontFamily: 'monospace', fontSize: 11, cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 type CategoryInsight = {
   category: string
   confidence: number
@@ -39,6 +118,9 @@ function DashboardContent() {
   const sessionId = searchParams.get('session')
 
   const [categories, setCategories] = useState<CategoryInsight[]>([])
+  const [emergingPicture, setEmergingPicture] = useState<string | null>(null)
+  const [completedSummaries, setCompletedSummaries] = useState<{ question: string; summary: string; data_backed?: boolean | null }[]>([])
+  const [categoryQuestionsMap, setCategoryQuestionsMap] = useState<Map<string, string[]>>(new Map())
   const [businessName, setBusinessName] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadingMessage, setLoadingMessage] = useState('Loading your session...')
@@ -68,12 +150,20 @@ function DashboardContent() {
 
     setBusinessName(session.business_name || '')
 
-    const completedSummaries: { question: string; summary: string }[] = session.completed_summaries || []
+    const completedSummaries: { question: string; summary: string; data_backed?: boolean | null }[] = session.completed_summaries || []
+    setCompletedSummaries(completedSummaries)
     const summaryCount = completedSummaries.length
 
     // Serve from cache if summaries haven't changed since last generation
     if (session.dashboard_cache && session.dashboard_cache_count === summaryCount) {
-      setCategories(session.dashboard_cache)
+      // Cache may be old array shape or new object shape
+      const cache = session.dashboard_cache
+      if (Array.isArray(cache)) {
+        setCategories(cache)
+      } else {
+        setCategories(cache.categories || [])
+        setEmergingPicture(cache.emerging_picture || null)
+      }
       setLoading(false)
       return
     }
@@ -108,13 +198,18 @@ function DashboardContent() {
       }
       categoryQuestions.get(q.category)!.push(q.core_question)
     })
+    setCategoryQuestionsMap(categoryQuestions)
 
-    const summaryMap = new Map(completedSummaries.map(s => [s.question, s.summary]))
+    const summaryMap = new Map(completedSummaries.map(s => [s.question, { summary: s.summary, data_backed: s.data_backed ?? null }]))
     const categoryData = categoryOrder.map(cat => {
       const qs = categoryQuestions.get(cat) || []
       return {
         name: cat,
-        covered: qs.filter(q => summaryMap.has(q)).map(q => ({ question: q, summary: summaryMap.get(q)! })),
+        covered: qs.filter(q => summaryMap.has(q)).map(q => ({
+          question: q,
+          summary: summaryMap.get(q)!.summary,
+          data_backed: summaryMap.get(q)!.data_backed,
+        })),
         uncovered: qs.filter(q => !summaryMap.has(q)),
       }
     })
@@ -142,11 +237,13 @@ function DashboardContent() {
 
     const data = await res.json()
     const freshCategories = data.categories || []
+    const freshSummary = data.emerging_picture || null
     setCategories(freshCategories)
+    setEmergingPicture(freshSummary)
 
-    // Save to cache
+    // Save to cache as new shape {emerging_picture, categories}
     await supabase.from('sessions').update({
-      dashboard_cache: freshCategories,
+      dashboard_cache: { emerging_picture: freshSummary, categories: freshCategories },
       dashboard_cache_count: summaryCount,
     }).eq('id', sid)
 
@@ -239,6 +336,27 @@ function DashboardContent() {
           </p>
         </div>
 
+        {emergingPicture && (
+          <div style={{
+            background: '#0F0F0A',
+            border: '1px solid rgba(200,169,110,0.15)',
+            borderLeft: '3px solid rgba(200,169,110,0.4)',
+            borderRadius: 8,
+            padding: '14px 18px',
+            marginBottom: 20,
+          }}>
+            <div style={{
+              fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em',
+              color: '#5A5040', marginBottom: 8,
+            }}>
+              EARLY PICTURE — INCOMPLETE
+            </div>
+            <p style={{ color: '#B8A880', fontSize: 14, lineHeight: 1.7, margin: 0, fontFamily: 'Georgia, serif' }}>
+              {emergingPicture}
+            </p>
+          </div>
+        )}
+
         {categories.length === 0 ? (
           <div style={{
             textAlign: 'center', padding: '60px 20px',
@@ -258,6 +376,13 @@ function DashboardContent() {
               const borderColor = confidenceBorderColor(cat.confidence)
               const labelColor = confidenceLabelColor(cat.confidence)
               const hasGaps = cat.data_gaps && cat.data_gaps.length > 0
+
+              // Data-backed indicator: count tagged summaries for this category
+              const catQuestions = categoryQuestionsMap.get(cat.category) || []
+              const catSummaries = completedSummaries.filter(s => catQuestions.includes(s.question))
+              const taggedSummaries = catSummaries.filter(s => s.data_backed !== null && s.data_backed !== undefined)
+              const dataBackedCount = taggedSummaries.filter(s => s.data_backed === true).length
+              const gutCount = taggedSummaries.filter(s => s.data_backed === false).length
 
               return (
                 <div
@@ -319,6 +444,26 @@ function DashboardContent() {
                     <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
                       <div style={{ height: 1, background: '#1A1A14' }} />
 
+                      {/* Evidence indicator */}
+                      {taggedSummaries.length > 0 && (
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                          <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em' }}>EVIDENCE</span>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {Array.from({ length: dataBackedCount }).map((_, i) => (
+                              <span key={`d${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4A7A4A', display: 'inline-block' }} title="Data-backed" />
+                            ))}
+                            {Array.from({ length: gutCount }).map((_, i) => (
+                              <span key={`g${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#7A5A28', display: 'inline-block' }} title="Gut feel" />
+                            ))}
+                          </div>
+                          <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 9 }}>
+                            {dataBackedCount > 0 && `${dataBackedCount} confirmed`}
+                            {dataBackedCount > 0 && gutCount > 0 && ' · '}
+                            {gutCount > 0 && `${gutCount} estimated`}
+                          </span>
+                        </div>
+                      )}
+
                       <div>
                         <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
                           CURRENT SITUATION
@@ -338,6 +483,13 @@ function DashboardContent() {
                         }}>
                           {cat.recommendation}
                         </p>
+                        {sessionId && (
+                          <FeedbackWidget
+                            sessionId={sessionId}
+                            category={cat.category}
+                            recommendation={cat.recommendation}
+                          />
+                        )}
                       </div>
 
                       {hasGaps && (
