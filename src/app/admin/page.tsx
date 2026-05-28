@@ -51,11 +51,33 @@ function SectionLabel({ children }: { children: string }) {
 function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: string }) {
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [cacheLoading, setCacheLoading] = useState(true)
+  const [fromCache, setFromCache] = useState(false)
+  const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [error, setError] = useState('')
+
+  // Load cached patterns on mount
+  useEffect(() => {
+    supabase
+      .from('admin_cache')
+      .select('data, sessions_count, updated_at')
+      .eq('key', 'patterns')
+      .single()
+      .then(({ data }) => {
+        if (data?.data) {
+          setResult(data.data)
+          setFromCache(true)
+          setCachedAt(data.updated_at)
+        }
+        setCacheLoading(false)
+      })
+  }, [])
 
   async function generate() {
     setLoading(true)
     setError('')
+    setFromCache(false)
+    const withData = sessions.filter(s => (s.completed_summaries || []).length > 0)
     const res = await fetch('/api/admin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -64,6 +86,14 @@ function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmai
     const data = await res.json()
     if (data.error) { setError(data.error); setLoading(false); return }
     setResult(data.result)
+    // Save to cache
+    await supabase.from('admin_cache').upsert({
+      key: 'patterns',
+      data: data.result,
+      sessions_count: withData.length,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' })
+    setCachedAt(new Date().toISOString())
     setLoading(false)
   }
 
@@ -71,10 +101,10 @@ function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmai
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button
           onClick={generate}
-          disabled={loading || withData.length === 0}
+          disabled={loading || cacheLoading || withData.length === 0}
           style={{
             background: loading ? '#1A1A14' : '#C8A96E',
             border: 'none', borderRadius: 6, padding: '10px 20px',
@@ -87,6 +117,11 @@ function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmai
         <span style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>
           {withData.length} sessions with data / {sessions.length} total
         </span>
+        {fromCache && cachedAt && (
+          <span style={{ ...mono, fontSize: 10, color: '#2A2A1E' }}>
+            cached {new Date(cachedAt).toLocaleDateString()}
+          </span>
+        )}
       </div>
 
       {error && <div style={{ ...mono, fontSize: 12, color: '#C07050' }}>{error}</div>}
@@ -203,7 +238,7 @@ function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmai
 
 function ClientCard({ session, adminEmail, allSessions }: { session: Session; adminEmail: string; allSessions: Session[] }) {
   const [expanded, setExpanded] = useState(false)
-  const [analysis, setAnalysis] = useState<any>(null)
+  const [analysis, setAnalysis] = useState<any>((session as any).admin_analysis || null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
 
   const summaryCount = (session.completed_summaries || []).length
@@ -218,6 +253,8 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
     })
     const data = await res.json()
     setAnalysis(data.result)
+    // Save to session row
+    await supabase.from('sessions').update({ admin_analysis: data.result }).eq('id', session.id)
     setAnalysisLoading(false)
   }
 
@@ -494,7 +531,7 @@ export default function AdminPage() {
     setSessionsLoading(true)
     supabase
       .from('sessions')
-      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, created_at')
+      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         setSessions(data || [])
