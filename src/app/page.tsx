@@ -123,6 +123,16 @@ export default function InterviewPage() {
       .then(({ data }) => { if (data) setResumableSession(data) })
   }, [user, allQuestions, phase])
 
+  // Auto-resume when returning from the dashboard
+  useEffect(() => {
+    if (phase !== 'start' || !resumableSession) return
+    const flag = sessionStorage.getItem('autoResume')
+    if (flag) {
+      sessionStorage.removeItem('autoResume')
+      resumeSession(resumableSession)
+    }
+  }, [resumableSession, phase])
+
   async function startSession() {
     if (!businessName.trim() || allQuestions.length === 0) return
     const { data } = await supabase

@@ -169,7 +169,7 @@ function DashboardContent() {
         }}>
           <div style={{ color: '#9A7050', fontFamily: 'monospace', fontSize: 13, marginBottom: 16 }}>{error}</div>
           <button
-            onClick={() => router.back()}
+            onClick={() => { sessionStorage.setItem('autoResume', 'true'); router.push('/') }}
             style={{
               background: '#C8A96E', border: 'none', borderRadius: 6,
               padding: '10px 20px', color: '#0C0C09', fontFamily: 'monospace',
@@ -193,7 +193,10 @@ function DashboardContent() {
         position: 'sticky', top: 0, zIndex: 10,
       }}>
         <button
-          onClick={() => router.back()}
+          onClick={() => {
+            sessionStorage.setItem('autoResume', 'true')
+            router.push('/')
+          }}
           style={{
             background: 'transparent', border: 'none', cursor: 'pointer',
             color: '#4A4A38', fontFamily: 'monospace', fontSize: 12,
