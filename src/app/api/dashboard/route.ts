@@ -76,5 +76,5 @@ Return ONLY a valid JSON array. No markdown, no preamble.`
     try { categories = match ? JSON.parse(match[0]) : [] } catch { categories = [] }
   }
 
-  return NextResponse.json({ categories, _debug: { rawLength: raw.length, rawEnd: raw.slice(-80), stopReason: response.stop_reason } })
+  return NextResponse.json({ categories })
 }
