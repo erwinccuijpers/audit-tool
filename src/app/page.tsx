@@ -1408,7 +1408,15 @@ export default function InterviewPage() {
     {(phase === 'intro' || phase === 'interview' || phase === 'done') && (
       <FeedbackButton
         sessionId={sessionId}
-        context={{ phase, currentQuestion: questions[qIndex]?.id ?? null }}
+        context={{
+          phase,
+          currentQuestion: questions[qIndex]?.id ?? null,
+          currentQuestionText: questions[qIndex]?.core_question ?? null,
+          answeredCount: answeredIds.length,
+          totalQuestions: questions.length,
+          businessName,
+          businessType: profile?.business_type ?? null,
+        }}
       />
     )}
     </>

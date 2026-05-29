@@ -377,6 +377,16 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [rawResponses, setRawResponses] = useState<RawResponse[] | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  function copyResumeLink(e: React.MouseEvent) {
+    e.stopPropagation()
+    const url = `${window.location.origin}/?resume=${session.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   const summaryCount = (session.completed_summaries || []).length
   const pct = session.current_q_index ? Math.round((session.current_q_index / 35) * 100) : 0
@@ -431,6 +441,19 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
           {session.status}
         </span>
         <span style={{ ...mono, fontSize: 10, color: '#3A3A28' }}>{summaryCount} topics</span>
+        <button
+          onClick={copyResumeLink}
+          title="Copy resume link"
+          style={{
+            background: copied ? '#0A120A' : 'transparent',
+            border: `1px solid ${copied ? '#3A5A3A' : '#2A2A1E'}`,
+            borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            color: copied ? '#7AAA7A' : '#3A3A28', ...mono, fontSize: 9,
+            letterSpacing: '0.06em', transition: 'all 0.2s', flexShrink: 0,
+          }}
+        >
+          {copied ? '✓ copied' : '⎘ link'}
+        </button>
         <span style={{ color: '#2A2A20', fontSize: 10 }}>{expanded ? '▲' : '▼'}</span>
       </div>
 
@@ -717,80 +740,225 @@ function ChatView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: s
 function FeedbackView() {
   const [entries, setEntries] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeType, setActiveType] = useState<'bug' | 'product'>('bug')
+  const [showReviewed, setShowReviewed] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [resolutionInputs, setResolutionInputs] = useState<Record<string, string>>({})
+  const [markingId, setMarkingId] = useState<string | null>(null)
 
-  useEffect(() => {
+  function load() {
+    setLoading(true)
     supabase
       .from('feedback')
-      .select('id, category, recommendation, feedback_text, created_at, sessions(business_name, business_type, industry)')
+      .select('id, category, feedback_type, recommendation, feedback_text, created_at, reviewed, resolution_note, ai_summary, session_snapshot, error_context, user_email, session_id, sessions(business_name, business_type, industry)')
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) console.error('FeedbackView:', error.message)
         setEntries(data || [])
         setLoading(false)
       })
-  }, [])
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function markReviewed(id: string) {
+    setMarkingId(id)
+    const note = resolutionInputs[id] || ''
+    await supabase.from('feedback').update({ reviewed: true, resolution_note: note || null }).eq('id', id)
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, reviewed: true, resolution_note: note } : e))
+    setMarkingId(null)
+    setExpandedId(null)
+  }
 
   if (loading) {
     return <div style={{ color: '#3A3A28', ...mono, fontSize: 12, textAlign: 'center', padding: 40 }}>Loading feedback...</div>
   }
 
-  if (entries.length === 0) {
-    return <div style={{ color: '#2A2A20', ...mono, fontSize: 12, textAlign: 'center', padding: 40 }}>No feedback submitted yet.</div>
-  }
+  const filtered = entries.filter(f => {
+    const type = f.feedback_type || (f.recommendation ? 'product' : 'bug')
+    if (type !== activeType) return false
+    if (!showReviewed && f.reviewed) return false
+    return true
+  })
 
-  // Group by category
-  const grouped = entries.reduce((acc, f) => {
-    const key = f.category || 'Uncategorized'
-    if (!acc[key]) acc[key] = []
-    acc[key].push(f)
-    return acc
-  }, {} as Record<string, any[]>)
-
-  const sortedAreas = Object.entries(grouped).sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length)
+  const unreadBugs = entries.filter(f => !(f.feedback_type === 'product' || f.recommendation) && !f.reviewed).length
+  const unreadProduct = entries.filter(f => (f.feedback_type === 'product' || f.recommendation) && !f.reviewed).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>
-        {entries.length} entries · {sortedAreas.length} areas
+
+      {/* Type tabs + reviewed toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {(['bug', 'product'] as const).map(t => {
+          const unread = t === 'bug' ? unreadBugs : unreadProduct
+          return (
+            <button key={t} onClick={() => setActiveType(t)} style={{
+              background: activeType === t ? '#1A1A14' : 'transparent',
+              border: `1px solid ${activeType === t ? '#C8A96E' : '#252520'}`,
+              borderRadius: 5, padding: '5px 14px', cursor: 'pointer',
+              color: activeType === t ? '#C8A96E' : '#4A4A38', ...mono, fontSize: 11,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              {t === 'bug' ? '🐛 Bugs' : '💬 Product'}
+              {unread > 0 && <span style={{ background: '#9A4A38', color: '#E8D0C8', borderRadius: 10, padding: '1px 6px', fontSize: 9 }}>{unread}</span>}
+            </button>
+          )
+        })}
+        <label style={{ ...mono, fontSize: 11, color: '#3A3A28', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showReviewed} onChange={e => setShowReviewed(e.target.checked)} />
+          Show reviewed
+        </label>
+        <span style={{ ...mono, fontSize: 10, color: '#2A2A1E' }}>{filtered.length} shown</span>
       </div>
 
-      {sortedAreas.map(([area, rawItems]) => {
-        const items = rawItems as any[]
+      {filtered.length === 0 && (
+        <div style={{ color: '#2A2A20', ...mono, fontSize: 12, textAlign: 'center', padding: 40 }}>
+          {showReviewed ? 'No feedback in this category.' : 'All caught up — no unreviewed feedback.'}
+        </div>
+      )}
+
+      {filtered.map(f => {
+        const session = Array.isArray(f.sessions) ? f.sessions[0] : f.sessions
+        const snap = f.session_snapshot
+        const ctx = f.error_context
+        const resumeLink = f.session_id ? `https://pocketcmo.pro/?resume=${f.session_id}` : null
+        const isExpanded = expandedId === f.id
+
         return (
-        <div key={area} style={card()}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <div style={{ ...label(), flex: 1 }}>{area.toUpperCase()}</div>
-            <span style={tag('#C8A96E', '#120E08')}>{items.length}×</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {(items as any[]).map((f) => {
-              const session = Array.isArray(f.sessions) ? f.sessions[0] : f.sessions
-              return (
-                <div key={f.id} style={{ borderLeft: '2px solid #1A1A14', paddingLeft: 12 }}>
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ ...mono, fontSize: 10, color: '#4A4A38' }}>
-                      {session?.business_name || 'Anonymous'}
-                    </span>
-                    {session?.business_type && (
-                      <span style={{ ...mono, fontSize: 9, color: '#2A2A20' }}>{session.business_type}</span>
-                    )}
-                    <span style={{ ...mono, fontSize: 9, color: '#2A2A20', marginLeft: 'auto' }}>
-                      {new Date(f.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  {f.recommendation && (
-                    <div style={{ color: '#2A2A1E', ...mono, fontSize: 10, marginBottom: 5, lineHeight: 1.4 }}>
-                      re: {f.recommendation.slice(0, 120)}{f.recommendation.length > 120 ? '…' : ''}
+          <div key={f.id} style={{
+            ...card(),
+            borderLeft: `3px solid ${f.reviewed ? '#1A1A14' : activeType === 'bug' ? '#9A4A38' : '#4A6A4A'}`,
+            opacity: f.reviewed ? 0.6 : 1,
+          }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                  <span style={{ ...mono, fontSize: 11, color: '#C8A96E' }}>
+                    {snap?.business_name || session?.business_name || 'Anonymous'}
+                  </span>
+                  {(snap?.business_type || session?.business_type) && (
+                    <span style={tag('#2A2A1E', '#0C0C09')}>{snap?.business_type || session?.business_type}</span>
+                  )}
+                  {f.category && (
+                    <span style={tag('#1E2A1E', '#0A0C0A')}>{f.category}</span>
+                  )}
+                  {f.reviewed && <span style={tag('#1A2A1A', '#0A0C0A')}>✓ reviewed</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {f.user_email && (
+                    <a href={`mailto:${f.user_email}`} style={{ ...mono, fontSize: 10, color: '#4A4A38', textDecoration: 'none' }}>
+                      ✉ {f.user_email}
+                    </a>
+                  )}
+                  {resumeLink && (
+                    <a href={resumeLink} target="_blank" rel="noreferrer" style={{ ...mono, fontSize: 10, color: '#4A4A38', textDecoration: 'none' }}>
+                      ↗ resume link
+                    </a>
+                  )}
+                  <span style={{ ...mono, fontSize: 9, color: '#2A2A1E' }}>
+                    {new Date(f.created_at).toLocaleDateString()} {new Date(f.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+              {!f.reviewed && (
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : f.id)}
+                  style={{
+                    background: 'transparent', border: '1px solid #252520', borderRadius: 5,
+                    padding: '4px 10px', cursor: 'pointer', color: '#5A5A48', ...mono, fontSize: 10,
+                  }}
+                >
+                  {isExpanded ? 'Cancel' : 'Mark reviewed'}
+                </button>
+              )}
+            </div>
+
+            {/* Feedback text */}
+            {f.recommendation && (
+              <div style={{ color: '#2A2A1E', ...mono, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontStyle: 'italic' }}>
+                re: "{f.recommendation.slice(0, 140)}{f.recommendation.length > 140 ? '…' : ''}"
+              </div>
+            )}
+            <div style={{ color: '#C8C0B0', fontSize: 13, lineHeight: 1.7, fontFamily: 'Georgia, serif', marginBottom: 10 }}>
+              "{f.feedback_text}"
+            </div>
+
+            {/* AI summary */}
+            {f.ai_summary && (
+              <div style={{
+                background: '#0A0A08', border: '1px solid #1A1A12', borderRadius: 6,
+                padding: '10px 12px', marginBottom: 10,
+              }}>
+                <div style={{ ...mono, fontSize: 9, color: '#3A3A28', letterSpacing: '0.1em', marginBottom: 6 }}>AI ANALYSIS</div>
+                <div style={{ ...mono, fontSize: 11, color: '#7A7A60', lineHeight: 1.7, whiteSpace: 'pre-line' }}>{f.ai_summary}</div>
+              </div>
+            )}
+
+            {/* Session snapshot + technical context (collapsed) */}
+            {(snap || ctx) && (
+              <details style={{ marginBottom: 8 }}>
+                <summary style={{ ...mono, fontSize: 10, color: '#3A3A28', cursor: 'pointer', marginBottom: 6 }}>
+                  Session context ▾
+                </summary>
+                <div style={{ ...mono, fontSize: 10, color: '#4A4A38', lineHeight: 1.8, paddingLeft: 8 }}>
+                  {snap && <>
+                    <div>Progress: {snap.answered_count} questions answered</div>
+                    {snap.completed_categories?.length > 0 && <div>Categories done: {snap.completed_categories.join(', ')}</div>}
+                    {snap.status && <div>Status: {snap.status}</div>}
+                    {snap.language && <div>Language: {snap.language}</div>}
+                  </>}
+                  {ctx?.currentQuestion && <div>Question at time: {ctx.currentQuestion}</div>}
+                  {ctx?.phase && <div>Phase: {ctx.phase}</div>}
+                  {ctx?.url && <div style={{ color: '#2A2A1E', wordBreak: 'break-all' }}>URL: {ctx.url}</div>}
+                  {ctx?.conversationSnippet?.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ color: '#2A2A1E', marginBottom: 4 }}>Last messages:</div>
+                      {ctx.conversationSnippet.map((m: any, i: number) => (
+                        <div key={i} style={{ color: m.role === 'user' ? '#6A6A50' : '#3A3A28', marginLeft: 8 }}>
+                          [{m.role}] {String(m.content).slice(0, 120)}{String(m.content).length > 120 ? '…' : ''}
+                        </div>
+                      ))}
                     </div>
                   )}
-                  <div style={{ color: '#9A9080', fontSize: 13, lineHeight: 1.6, fontFamily: 'Georgia, serif' }}>
-                    {f.feedback_text}
-                  </div>
                 </div>
-              )
-            })}
+              </details>
+            )}
+
+            {/* Resolution note if already reviewed */}
+            {f.reviewed && f.resolution_note && (
+              <div style={{ ...mono, fontSize: 10, color: '#4A6A4A', borderTop: '1px solid #1A1A14', paddingTop: 8 }}>
+                Resolution: {f.resolution_note}
+              </div>
+            )}
+
+            {/* Mark reviewed form */}
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid #1A1A14', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea
+                  placeholder="Resolution note (optional) — what was fixed or communicated..."
+                  value={resolutionInputs[f.id] || ''}
+                  onChange={e => setResolutionInputs(prev => ({ ...prev, [f.id]: e.target.value }))}
+                  rows={2}
+                  style={{
+                    background: '#0C0C09', border: '1px solid #1E1E14', borderRadius: 6,
+                    padding: '8px 10px', color: '#D0C8B8', ...mono, fontSize: 11,
+                    outline: 'none', resize: 'none', lineHeight: 1.5, width: '100%', boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  onClick={() => markReviewed(f.id)}
+                  disabled={markingId === f.id}
+                  style={{
+                    alignSelf: 'flex-end', background: '#C8A96E', border: 'none', borderRadius: 5,
+                    padding: '6px 16px', cursor: 'pointer', color: '#0C0C09', ...mono, fontSize: 11,
+                  }}
+                >
+                  {markingId === f.id ? 'Saving...' : '✓ Mark reviewed'}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
         )
       })}
     </div>

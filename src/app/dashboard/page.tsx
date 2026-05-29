@@ -13,14 +13,37 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
   async function submit() {
     if (!text.trim()) return
     setLoading(true)
-    await supabase.from('feedback').insert({
+
+    const { data: { user } } = await supabase.auth.getUser()
+    const errorContext = { recommendation, url: window.location.href, timestamp: new Date().toISOString() }
+
+    const { data: inserted } = await supabase.from('feedback').insert({
       session_id: sessionId,
       category,
       recommendation,
+      feedback_type: 'product',
       feedback_text: text.trim(),
-    })
+      error_context: errorContext,
+      user_email: user?.email || null,
+    }).select('id').single()
+
     setDone(true)
     setLoading(false)
+
+    if (inserted?.id) {
+      fetch('/api/feedback-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedbackId: inserted.id,
+          sessionId,
+          feedbackType: 'product',
+          feedbackText: text.trim(),
+          feedbackCategory: category,
+          errorContext,
+        }),
+      }).catch(() => { /* background, non-critical */ })
+    }
   }
 
   if (done) {

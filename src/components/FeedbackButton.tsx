@@ -25,20 +25,57 @@ export default function FeedbackButton({ sessionId, context }: Props) {
   async function submit() {
     if (!text.trim() || loading) return
     setLoading(true)
-    const errorContext = {
+
+    // Enrich context with conversation snippet from sessionStorage
+    let conversationSnippet: any[] = []
+    if (sessionId) {
+      try {
+        const cached = sessionStorage.getItem(`conv_${sessionId}`)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          conversationSnippet = parsed.slice(-4) // last 4 messages
+        }
+      } catch { /* ignore */ }
+    }
+
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const enrichedContext = {
       ...context,
       userAgent: navigator.userAgent,
       url: window.location.href,
       timestamp: new Date().toISOString(),
+      conversationSnippet,
     }
-    await supabase.from('feedback').insert({
+
+    const { data: inserted } = await supabase.from('feedback').insert({
       session_id: sessionId || null,
       category,
+      feedback_type: 'bug',
       feedback_text: text,
-      error_context: errorContext,
-    })
+      error_context: enrichedContext,
+      user_email: user?.email || null,
+    }).select('id').single()
+
     setSubmitted(true)
     setLoading(false)
+
+    // Fire analyze in background — user never waits for this
+    if (inserted?.id) {
+      fetch('/api/feedback-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedbackId: inserted.id,
+          sessionId: sessionId || null,
+          feedbackType: 'bug',
+          feedbackText: text,
+          feedbackCategory: category,
+          errorContext: enrichedContext,
+        }),
+      }).catch(() => { /* background, non-critical */ })
+    }
+
     setTimeout(() => {
       setOpen(false)
       setSubmitted(false)
