@@ -327,6 +327,7 @@ function DashboardContent() {
             )}
           </div>
         </div>
+        <FeedbackButton sessionId={sessionId} context={{ phase: 'dashboard_loading' }} />
       </>
     )
   }
