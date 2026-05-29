@@ -2,6 +2,7 @@
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
+import FeedbackButton from '@/components/FeedbackButton'
 
 function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: string; category: string; recommendation: string }) {
   const [open, setOpen] = useState(false)
@@ -132,6 +133,7 @@ function DashboardContent() {
   const [businessName, setBusinessName] = useState('')
   const [sessionStatus, setSessionStatus] = useState('')
   const [reopening, setReopening] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMessage, setLoadingMessage] = useState('Loading your session...')
   const [loadingSlow, setLoadingSlow] = useState(false)
@@ -281,6 +283,14 @@ function DashboardContent() {
     router.push('/')
   }
 
+  async function handleRefresh() {
+    if (!sessionId || refreshing) return
+    setRefreshing(true)
+    await supabase.from('sessions').update({ dashboard_cache: null, dashboard_cache_count: null }).eq('id', sessionId)
+    setRefreshing(false)
+    loadDashboard(sessionId)
+  }
+
   const coveredCount = categories.filter(c => c.confidence > 0).length
 
   if (loading) {
@@ -396,8 +406,24 @@ function DashboardContent() {
         {businessName && (
           <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 12 }}>{businessName}</span>
         )}
-        <div style={{ marginLeft: 'auto', color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>
-          {coveredCount} of {categories.length} areas covered
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Recompute dashboard from latest data"
+            style={{
+              background: 'transparent', border: 'none', cursor: refreshing ? 'default' : 'pointer',
+              color: refreshing ? '#2A2A1E' : '#3A3A28', fontFamily: 'monospace', fontSize: 11,
+              padding: 0, transition: 'color 0.2s',
+            }}
+            onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#C8A96E' }}
+            onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#3A3A28' }}
+          >
+            {refreshing ? '↻ refreshing...' : '↻ refresh'}
+          </button>
+          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>
+            {coveredCount} of {categories.length} areas covered
+          </div>
         </div>
       </div>
 
@@ -593,6 +619,7 @@ function DashboardContent() {
           </div>
         )}
       </div>
+      <FeedbackButton sessionId={sessionId} context={{ phase: 'dashboard' }} />
     </div>
   )
 }
