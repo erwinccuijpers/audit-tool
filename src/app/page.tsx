@@ -439,9 +439,10 @@ export default function InterviewPage() {
 
     const filtered = allQuestions.filter(q => {
       if (!q.applies_to || q.applies_to.length === 0) return true
-      if (q.applies_to.includes('has_employees') && !session.has_employees) return false
+      if (q.applies_to.includes('has_employees') && session.has_employees === false) return false
       if (q.applies_to.includes('all')) return true
       if (q.applies_to.includes('has_employees') && session.has_employees) return true
+      if (q.applies_to.includes('has_employees')) return true // null = unknown, include
       return q.applies_to.includes(session.business_type)
     })
     setQuestions(filtered)
