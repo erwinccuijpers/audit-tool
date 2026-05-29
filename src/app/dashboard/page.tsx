@@ -32,13 +32,21 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
         <button
           onClick={e => { e.stopPropagation(); setOpen(true) }}
           style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            color: '#2A2A20', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.08em',
+            background: 'transparent', border: '1px solid #252520',
+            borderRadius: 5, padding: '5px 12px', cursor: 'pointer',
+            color: '#5A5A48', fontFamily: 'monospace', fontSize: 10,
+            letterSpacing: '0.06em', transition: 'border-color 0.2s, color 0.2s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#4A4A38')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#2A2A20')}
+          onMouseEnter={e => {
+            e.currentTarget.style.borderColor = 'rgba(200,169,110,0.3)'
+            e.currentTarget.style.color = '#C8A96E'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.borderColor = '#252520'
+            e.currentTarget.style.color = '#5A5A48'
+          }}
         >
-          + LEAVE FEEDBACK
+          + Leave feedback
         </button>
       ) : (
         <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -122,8 +130,11 @@ function DashboardContent() {
   const [completedSummaries, setCompletedSummaries] = useState<{ question: string; summary: string; data_backed?: boolean | null }[]>([])
   const [categoryQuestionsMap, setCategoryQuestionsMap] = useState<Map<string, string[]>>(new Map())
   const [businessName, setBusinessName] = useState('')
+  const [sessionStatus, setSessionStatus] = useState('')
+  const [reopening, setReopening] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMessage, setLoadingMessage] = useState('Loading your session...')
+  const [loadingSlow, setLoadingSlow] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -131,6 +142,12 @@ function DashboardContent() {
     if (!sessionId) { setError('No session ID in URL.'); setLoading(false); return }
     loadDashboard(sessionId)
   }, [sessionId])
+
+  useEffect(() => {
+    if (!loading) { setLoadingSlow(false); return }
+    const t = setTimeout(() => setLoadingSlow(true), 30000)
+    return () => clearTimeout(t)
+  }, [loading])
 
   async function loadDashboard(sid: string) {
     setLoading(true)
@@ -149,6 +166,7 @@ function DashboardContent() {
     }
 
     setBusinessName(session.business_name || '')
+    setSessionStatus(session.status || '')
 
     const completedSummaries: { question: string; summary: string; data_backed?: boolean | null }[] = session.completed_summaries || []
     setCompletedSummaries(completedSummaries)
@@ -182,8 +200,11 @@ function DashboardContent() {
     }
 
     const businessType = session.business_type || ''
+    const hasEmployees = session.has_employees
     const filtered = questions.filter((q: any) => {
       if (!q.applies_to || q.applies_to.length === 0) return true
+      if (q.applies_to.includes('has_employees') && hasEmployees === false) return false
+      if (q.applies_to.includes('has_employees')) return true // true or null = include
       if (!businessType) return true
       return q.applies_to.includes(businessType) || q.applies_to.includes('all')
     })
@@ -226,6 +247,7 @@ function DashboardContent() {
         businessDescription: session.business_description,
         ownerTone: session.owner_tone,
         categoryData,
+        language: session.language || 'English',
       }),
     })
 
@@ -236,6 +258,7 @@ function DashboardContent() {
     }
 
     const data = await res.json()
+    if (data.usage) console.log('[tokens] dashboard:', data.usage)
     const freshCategories = data.categories || []
     const freshSummary = data.emerging_picture || null
     setCategories(freshCategories)
@@ -250,18 +273,51 @@ function DashboardContent() {
     setLoading(false)
   }
 
+  async function handleReopen() {
+    if (!sessionId || reopening) return
+    setReopening(true)
+    await supabase.from('sessions').update({ status: 'in_progress' }).eq('id', sessionId)
+    sessionStorage.setItem('autoResume', 'true')
+    router.push('/')
+  }
+
   const coveredCount = categories.filter(c => c.confidence > 0).length
 
   if (loading) {
     return (
-      <div style={{
-        minHeight: '100dvh', background: '#0C0C09',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexDirection: 'column', gap: 10,
-      }}>
-        <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13 }}>{loadingMessage}</div>
-        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>Building confidence scores across all areas</div>
-      </div>
+      <>
+        <style>{`
+          @keyframes pocketDot {
+            0%, 100% { opacity: 0.2; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-4px); }
+          }
+        `}</style>
+        <div style={{
+          minHeight: '100dvh', background: '#0C0C09',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 18,
+        }}>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{
+                width: 7, height: 7, borderRadius: '50%', background: '#C8A96E',
+                animation: `pocketDot 1.4s ease-in-out ${i * 0.22}s infinite`,
+              }} />
+            ))}
+          </div>
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13 }}>{loadingMessage}</div>
+            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>
+              This usually takes 30–60 seconds
+            </div>
+            {loadingSlow && (
+              <div style={{ color: '#6A6A50', fontFamily: 'monospace', fontSize: 11, marginTop: 4 }}>
+                Don't worry, we're still on it — just taking a bit longer than expected.
+              </div>
+            )}
+          </div>
+        </div>
+      </>
     )
   }
 
@@ -316,6 +372,25 @@ function DashboardContent() {
         >
           ← Interview
         </button>
+        {sessionStatus === 'completed' && (
+          <>
+            <div style={{ width: 1, height: 14, background: '#1E1E14' }} />
+            <button
+              onClick={handleReopen}
+              disabled={reopening}
+              style={{
+                background: 'transparent', border: '1px solid #252520',
+                borderRadius: 5, padding: '4px 12px', cursor: reopening ? 'default' : 'pointer',
+                color: reopening ? '#3A3A28' : '#7A7A58', fontFamily: 'monospace', fontSize: 11,
+                letterSpacing: '0.05em', transition: 'all 0.2s',
+              }}
+              onMouseEnter={e => { if (!reopening) { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.35)'; e.currentTarget.style.color = '#C8A96E' } }}
+              onMouseLeave={e => { if (!reopening) { e.currentTarget.style.borderColor = '#252520'; e.currentTarget.style.color = '#7A7A58' } }}
+            >
+              {reopening ? 'Opening...' : '+ Continue interview'}
+            </button>
+          </>
+        )}
         <div style={{ width: 1, height: 14, background: '#1E1E14' }} />
         <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.12em' }}>OVERVIEW</span>
         {businessName && (
