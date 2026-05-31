@@ -25,8 +25,9 @@ Extract a business profile as JSON with exactly this structure:
   "awareness_level": "one of: knows_the_gap / has_a_hunch / no_idea",
   "owner_tone": "one of: confident / stressed / defensive / excited / uncertain",
   "first_name": "owner first name if mentioned, otherwise null",
-  "skip_questions": ["list of question IDs from this set that are clearly irrelevant based on what was said: q38, q39, q49, q50, q21, q22, t3, t4, t6"],
-  "emphasis_areas": ["list of category names that seem most relevant based on what was said, from: acquisition, retention, revenue, marketing, positioning, tools, leverage, risk"]
+  "has_employees": true or false — true if the business clearly has staff, team members, or employees beyond just the owner; false if they appear to run it solo or haven't mentioned any staff,
+  "skip_questions": ["list of question IDs from this set that are clearly irrelevant based on what was said: q21, q22, t3, t4, t6"],
+  "emphasis_areas": ["list of category names that seem most relevant based on what was said, from: positioning, acquisition, retention, revenue, strategy, tools, people"]
 }
 
 Business types:
@@ -50,9 +51,14 @@ Return only the JSON object, no markdown, no explanation.`
 
   const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}'
 
+  const country = req.headers.get('x-vercel-ip-country') || null
+  const city = req.headers.get('x-vercel-ip-city')
+    ? decodeURIComponent(req.headers.get('x-vercel-ip-city')!)
+    : null
+
   try {
     const profile = JSON.parse(text)
-    return NextResponse.json({ profile })
+    return NextResponse.json({ profile, usage: response.usage, country, city })
   } catch {
     return NextResponse.json({ error: 'Failed to parse profile', raw: text }, { status: 500 })
   }

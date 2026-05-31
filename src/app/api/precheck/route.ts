@@ -48,7 +48,7 @@ Return only the JSON, no markdown.`
 
   try {
     const result = JSON.parse(text)
-    return NextResponse.json({ covered: result.covered === true })
+    return NextResponse.json({ covered: result.covered === true, usage: response.usage })
   } catch {
     return NextResponse.json({ covered: false })
   }

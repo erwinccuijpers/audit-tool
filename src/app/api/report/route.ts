@@ -6,7 +6,8 @@ const anthropic = new Anthropic({
 })
 
 export async function POST(req: NextRequest) {
-  const { businessName, responses } = await req.json()
+  const { businessName, responses, language } = await req.json()
+  const lang = language || 'English'
 
   const transcript = responses.map((r: any) => {
     const messages = r.conversation
@@ -48,12 +49,24 @@ Based on this, produce a diagnostic report as a JSON object with exactly this st
       "desc": "one sentence description",
       "mvp": "how to validate this manually before building"
     }
-  ]
+  ],
+  "firmographics": {
+    "niche": "specific sub-category in a few words, e.g. 'specialty wine & cheese retail', 'mobile dog grooming' — more precise than the industry",
+    "employee_count": <integer: best estimate of TOTAL people working in the business including the owner, or null if truly unknown>,
+    "size_band": "one of: solo / micro / small / medium / large (solo=1, micro=2-9, small=10-49, medium=50-249, large=250+)",
+    "revenue_band": "best estimate of annual revenue, one of: under_100k / 100k_250k / 250k_500k / 500k_1m / 1m_5m / 5m_plus / unknown",
+    "years_in_business": <integer years since founding, or null if not stated>,
+    "region": "state / province / region if identifiable (e.g. 'Connecticut'), else null"
+  }
 }
+
+For firmographics, infer conservatively from everything the owner said (staff mentioned, transaction values, customer counts, founding year, location). Use the bands; do not invent precise figures. If a value genuinely can't be estimated, use null (or "unknown" for revenue_band).
 
 Categories to always include: Client Acquisition, Revenue Optimization, Client Retention, Marketing & Visibility, Tools & Systems, Competitive Position
 
 Score honestly — do not inflate scores. If something was not discussed or the owner didn't know the answer, score it 2.
+
+LANGUAGE: Write all text values in ${lang}. JSON keys stay in English.
 
 Return only the JSON object, no markdown, no explanation.`
 
@@ -67,7 +80,7 @@ Return only the JSON object, no markdown, no explanation.`
   
   try {
     const report = JSON.parse(text)
-    return NextResponse.json({ report })
+    return NextResponse.json({ report, usage: response.usage })
   } catch {
     return NextResponse.json({ error: 'Failed to parse report', raw: text }, { status: 500 })
   }

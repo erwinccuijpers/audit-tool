@@ -1,8 +1,10 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
+import FeedbackButton from '@/components/FeedbackButton'
+import ClientNav from '@/components/ClientNav'
+import { ensureReport } from '@/lib/report'
 
 type AreaScore = {
   category: string
@@ -64,8 +66,11 @@ function ResultsContent() {
   const [report, setReport] = useState<Report | null>(null)
   const [businessName, setBusinessName] = useState('')
   const [loading, setLoading] = useState(true)
+  const [regenerating, setRegenerating] = useState(false)
   const [error, setError] = useState('')
   const [openArea, setOpenArea] = useState<number | null>(null)
+  const [expandAll, setExpandAll] = useState(false)
+  const printMode = searchParams.get('print') === '1'
 
   useEffect(() => {
     if (!sessionId) {
@@ -73,83 +78,137 @@ function ResultsContent() {
       setLoading(false)
       return
     }
-    generateReport()
+    ensureReport(sessionId).then(res => {
+      if (res.error) setError(res.error)
+      else { setReport(res.report ?? null); setBusinessName(res.businessName || '') }
+      setLoading(false)
+    })
   }, [sessionId])
 
-  async function generateReport() {
-    // Load session
-    const { data: session } = await supabase
-      .from('sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single()
-
-    if (!session) {
-      setError('Session not found.')
-      setLoading(false)
-      return
+  // When arriving with ?print=1 (the hub's "Download PDF"), expand everything
+  // and open the browser print dialog so the user can save as PDF.
+  useEffect(() => {
+    if (printMode && report && !loading) {
+      setExpandAll(true)
+      const t = setTimeout(() => window.print(), 600)
+      return () => clearTimeout(t)
     }
+  }, [printMode, report, loading])
 
-    setBusinessName(session.business_name)
+  function downloadPdf() {
+    setExpandAll(true)
+    setTimeout(() => window.print(), 300)
+  }
 
-    // Load all responses with question text
-    const { data: responses } = await supabase
-      .from('responses')
-      .select('*, questions(core_question)')
-      .eq('session_id', sessionId)
-
-    if (!responses || responses.length === 0) {
-      setError('No responses found for this session.')
-      setLoading(false)
-      return
-    }
-
-    const formatted = responses.map((r: any) => ({
-      question: r.questions?.core_question || 'Unknown question',
-      conversation: r.conversation || [],
-    }))
-
-    // Generate report via Claude
-    const res = await fetch('/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessName: session.business_name, responses: formatted }),
-    })
-
-    const { report: generated, error: apiError } = await res.json()
-
-    if (apiError) {
-      setError('Failed to generate report.')
-      setLoading(false)
-      return
-    }
-
-    setReport(generated)
-    setLoading(false)
+  async function handleRegenerate() {
+    if (regenerating || !sessionId) return
+    setRegenerating(true)
+    const res = await ensureReport(sessionId, { force: true })
+    if (res.error) setError(res.error)
+    else { setReport(res.report ?? null); setBusinessName(res.businessName || '') }
+    setRegenerating(false)
   }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, marginBottom: 12 }}>Analysing your interview...</div>
-        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>This takes about 10 seconds</div>
+    <>
+      <style>{`
+        @keyframes cmo-slide {
+          0%   { left: -45%; width: 45%; }
+          60%  { width: 45%; }
+          100% { left: 145%; width: 45%; }
+        }
+        @keyframes cmo-dot {
+          0%, 100% { opacity: 0.2; transform: scale(0.8); }
+          50%       { opacity: 1;   transform: scale(1); }
+        }
+      `}</style>
+      <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.18em', marginBottom: 28 }}>
+          DIAGNOSTIC REPORT
+        </div>
+        <div style={{ width: 180, height: 2, background: '#1A1A14', borderRadius: 1, position: 'relative', overflow: 'hidden', marginBottom: 28 }}>
+          <div style={{
+            position: 'absolute', top: 0, height: '100%',
+            background: 'linear-gradient(90deg, transparent, #C8A96E, transparent)',
+            borderRadius: 1, animation: 'cmo-slide 1.8s ease-in-out infinite',
+          }} />
+        </div>
+        <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.04em', marginBottom: 16 }}>
+          Building your report
+        </div>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 28 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 5, height: 5, borderRadius: '50%', background: '#4A4A38',
+              animation: `cmo-dot 1.4s ease-in-out ${i * 0.22}s infinite`,
+            }} />
+          ))}
+        </div>
+        <div style={{ color: '#2A2A1E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
+          Analyzing your answers…
+        </div>
+        <FeedbackButton sessionId={sessionId} context={{ phase: 'report_loading' }} />
       </div>
-    </div>
+    </>
   )
 
   if (error) return (
     <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ color: '#E07B5A', fontFamily: 'monospace', fontSize: 13 }}>{error}</div>
+      <FeedbackButton sessionId={sessionId} context={{ phase: 'report_error', error }} />
     </div>
   )
 
   if (!report) return null
 
-  const criticalCount = report.areas.filter(a => a.score <= 2).length
+  const areas = report.areas ?? []
+  const quickWins = report.quickWins ?? []
+  const bigBets = report.bigBets ?? []
+  const criticalCount = areas.filter(a => a.score <= 2).length
 
   return (
     <div style={{ minHeight: '100vh', background: '#0C0C09', fontFamily: 'Georgia, serif', color: '#E8E0D0' }}>
-      {/* Header */}
+      {/* Keep the dark theme when saving to PDF; hide interactive controls. */}
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #0C0C09 !important; }
+        }
+      `}</style>
+      {/* Shared client nav (hidden when printing to PDF) */}
+      <div className="no-print">
+        <ClientNav
+          sessionId={sessionId}
+          active="results"
+          businessName={businessName}
+          actions={
+            <>
+              <button
+                onClick={downloadPdf}
+                title="Download this report as a PDF"
+                style={{
+                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
+                  padding: '5px 12px', color: '#6A6450', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em', cursor: 'pointer',
+                }}
+              >⤓ Download PDF</button>
+              <button
+                onClick={handleRegenerate}
+                disabled={regenerating}
+                title="Regenerate this report from the interview data"
+                style={{
+                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
+                  padding: '5px 12px', color: regenerating ? '#3A3A28' : '#6A6450',
+                  fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em',
+                  cursor: regenerating ? 'default' : 'pointer',
+                }}
+              >
+                {regenerating ? 'Regenerating…' : '↻ Regenerate'}
+              </button>
+            </>
+          }
+        />
+      </div>
+      {/* Report document header */}
       <div style={{ background: '#0F0F0B', borderBottom: '1px solid #1A1A14', padding: '20px 32px' }}>
         <div style={{ maxWidth: 860, margin: '0 auto' }}>
           <div style={{ fontSize: 10, letterSpacing: '0.18em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 6 }}>DIAGNOSTIC REPORT</div>
@@ -157,9 +216,9 @@ function ResultsContent() {
             <h1 style={{ fontSize: 26, fontWeight: 400, margin: 0 }}>{businessName}</h1>
             <div style={{ display: 'flex', gap: 20 }}>
               {[
-                ['Areas Reviewed', report.areas.length, '#C8A96E'],
+                ['Areas Reviewed', areas.length, '#C8A96E'],
                 ['Critical Gaps', criticalCount, '#E07B5A'],
-                ['Quick Wins', report.quickWins.length, '#7EB8A4'],
+                ['Quick Wins', quickWins.length, '#7EB8A4'],
               ].map(([l, v, c]) => (
                 <div key={String(l)} style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 20, color: String(c), fontFamily: 'Georgia, serif' }}>{v}</div>
@@ -182,7 +241,7 @@ function ResultsContent() {
         {/* Area scores */}
         <div style={{ fontSize: 10, letterSpacing: '0.15em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 14 }}>AREA BREAKDOWN</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 32 }}>
-          {report.areas.sort((a, b) => a.score - b.score).map((area, i) => (
+          {areas.sort((a, b) => a.score - b.score).map((area, i) => (
             <div key={i} onClick={() => setOpenArea(openArea === i ? null : i)} style={{
               background: '#111110', border: `1px solid ${openArea === i ? '#252520' : '#1A1A14'}`,
               borderRadius: 8, padding: '16px 20px', cursor: 'pointer', transition: 'border 0.15s',
@@ -192,7 +251,7 @@ function ResultsContent() {
                 <span style={{ fontSize: 11, fontFamily: 'monospace', color: scoreColor(area.score) }}>{area.label}</span>
               </div>
               <ScoreBar score={area.score} />
-              {openArea === i && (
+              {(openArea === i || expandAll) && (
                 <div style={{ marginTop: 16, borderTop: '1px solid #1E1E14', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 10, letterSpacing: '0.12em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 6 }}>FINDING</div>
@@ -211,7 +270,7 @@ function ResultsContent() {
         {/* Quick wins */}
         <div style={{ fontSize: 10, letterSpacing: '0.15em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 14 }}>QUICK WINS — Do These First</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10, marginBottom: 32 }}>
-          {report.quickWins.map((w, i) => (
+          {quickWins.map((w, i) => (
             <div key={i} style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: 8, padding: '16px 18px' }}>
               <div style={{ fontSize: 14, color: '#D0C8B8', marginBottom: 8 }}>{w.title}</div>
               <p style={{ fontSize: 12, color: '#706850', fontFamily: 'monospace', lineHeight: 1.6, margin: '0 0 12px' }}>{w.desc}</p>
@@ -234,7 +293,7 @@ function ResultsContent() {
         {/* Big bets */}
         <div style={{ fontSize: 10, letterSpacing: '0.15em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 14 }}>BIG BETS — Validate Before Building</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {report.bigBets.map((b, i) => (
+          {bigBets.map((b, i) => (
             <div key={i} style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: 8, padding: '16px 20px' }}>
               <div style={{ fontSize: 15, color: '#D0C8B8', marginBottom: 6 }}>{b.title}</div>
               <p style={{ fontSize: 13, color: '#706850', fontFamily: 'monospace', lineHeight: 1.6, margin: '0 0 12px' }}>{b.desc}</p>
@@ -246,6 +305,9 @@ function ResultsContent() {
           ))}
         </div>
 
+      </div>
+      <div className="no-print">
+        <FeedbackButton sessionId={sessionId} context={{ phase: 'report_complete' }} />
       </div>
     </div>
   )

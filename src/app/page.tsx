@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SideNav from '@/components/SideNav'
 import FeedbackButton from '@/components/FeedbackButton'
+import { addSessionUsage } from '@/lib/usage'
 
 type Question = {
   id: string
@@ -32,7 +33,49 @@ type BusinessProfile = {
   has_employees?: boolean
 }
 
-type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'done'
+type Phase = 'start' | 'intro' | 'classifying' | 'interview' | 'referral' | 'done'
+
+// ── Pillar-mode types ──────────────────────────────────────────────────────────
+const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people'] as const
+type PillarName = typeof PILLAR_ORDER[number]
+
+const PILLAR_LABELS: Record<PillarName, string> = {
+  positioning: 'Positioning',
+  acquisition: 'Acquisition',
+  retention:   'Retention',
+  revenue:     'Revenue',
+  strategy:    'Strategy',
+  tools:       'Tools & Systems',
+  people:      'People',
+}
+
+const PILLAR_TRANSITIONS: Record<string, string> = {
+  'positioning→acquisition': "Good. Now let's look at how you bring in new clients.",
+  'acquisition→retention':   "Got it. Let's shift to how you keep the clients you have.",
+  'retention→revenue':       "Thanks. Now let's dig into the revenue picture.",
+  'revenue→strategy':        "Helpful. Let's zoom out and talk about where the business is going.",
+  'strategy→tools':          "Good. Now let's go through the tools and systems you're working with.",
+  'tools→people':            "Almost done. Last section — let's talk about your team.",
+}
+
+type PillarQuestion = {
+  id: string
+  coreQuestion: string
+  toolNote: string | null
+  followUps: string[]
+}
+
+type PillarSummary = {
+  contextSummary: string
+  entities: { tools: string[]; numbers: string[]; competitors: string[]; flags: string[] }
+  confidence: number
+  situation: string
+  recommendation: string
+  dataGaps: string[]
+  completedAt: string
+  dataBacked: boolean | null
+  conversation?: { role: 'user' | 'assistant'; content: string }[]
+}
 
 type CatInfo = { name: string; minIdx: number; maxIdx: number }
 
@@ -108,10 +151,21 @@ export default function InterviewPage() {
   const [language, setLanguage] = useState('en')
   const [customLanguage, setCustomLanguage] = useState('')
   const lastPayload = useRef<object | null>(null)
+  const lastPillarPayload = useRef<object | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const tokenTotals = useRef({ input: 0, output: 0 })
   // Counts every Claude API response (not just completed questions) — used to trigger save overlay
   const claudeResponsesRef = useRef(0)
+
+  // ── Pillar-mode state ────────────────────────────────────────────────────────
+  const [pillarMode, setPillarMode] = useState(false)
+  const [currentPillarIndex, setCurrentPillarIndex] = useState(0)
+  const [pillarSummaries, setPillarSummaries] = useState<Record<string, PillarSummary>>({})
+  const [pillarQuestions, setPillarQuestions] = useState<Record<string, PillarQuestion[]>>({})
+  const [generatingSummary, setGeneratingSummary] = useState(false)
+  const pillarSummariesRef = useRef<Record<string, PillarSummary>>({})
+  // Keep ref in sync so async callbacks always have latest value
+  useEffect(() => { pillarSummariesRef.current = pillarSummaries }, [pillarSummaries])
 
   function trackUsage(usage: { input_tokens?: number; output_tokens?: number } | null | undefined) {
     if (!usage) return
@@ -139,8 +193,26 @@ export default function InterviewPage() {
   const [saveBarDismissed, setSaveBarDismissed] = useState(false)
   const [resumeIdFromUrl, setResumeIdFromUrl] = useState<string | null>(null)
   const [answeredIds, setAnsweredIds] = useState<string[]>([])
+  const [utmParams, setUtmParams] = useState<Record<string, string>>({})
+  // Auto-dashboard notification state
+  const [dashboardNotif, setDashboardNotif] = useState<'idle' | 'creating' | 'ready'>('idle')
+  const [dashboardNotifStage, setDashboardNotifStage] = useState<'first' | 'halfway'>('first')
+  const dashboardAutoFiredRef = useRef(false)
+  const halfwayAutoFiredRef = useRef(false)
+  // Refs for stale-closure safety inside the 15-min timer
+  const completedSummariesRef = useRef(completedSummaries)
+  const questionsRef = useRef(questions)
+  const profileRef = useRef(profile)
+  const businessNameRef = useRef(businessName)
+  const sessionIdRef = useRef(sessionId)
+  const languageRef = useRef(language)
+  const customLanguageRef = useRef(customLanguage)
+  const phaseRef = useRef(phase)
+  // Tracks where the current question started in the conversation array.
+  // Used to extract only this question's user replies for raw_answer in the transcript.
+  const questionConvStartRef = useRef(0)
 
-  // Read ?resume=SESSION_ID from URL on mount and clean up the URL immediately
+  // Read ?resume=SESSION_ID and UTM params from URL on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const id = params.get('resume')
@@ -148,6 +220,12 @@ export default function InterviewPage() {
       setResumeIdFromUrl(id)
       window.history.replaceState({}, '', window.location.pathname)
     }
+    const utm: Record<string, string> = {}
+    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']) {
+      const v = params.get(key)
+      if (v) utm[key] = v
+    }
+    if (Object.keys(utm).length > 0) setUtmParams(utm)
   }, [])
 
   // Once auth is confirmed and questions are loaded, resume the session from the link
@@ -173,6 +251,7 @@ export default function InterviewPage() {
         .from('questions')
         .select('*, follow_ups(text, sort_order)')
         .eq('active', true)
+        .in('category', ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people'])
         .order('sort_order')
       if (data) setAllQuestions(data)
     }
@@ -231,6 +310,37 @@ export default function InterviewPage() {
       .then(({ data }) => { if (data) resumeSession(data) })
   }, [user, authChecked, allQuestions, phase])
 
+  // Keep refs current for auto-dashboard timer (prevents stale closures)
+  useEffect(() => { completedSummariesRef.current = completedSummaries }, [completedSummaries])
+  useEffect(() => { questionsRef.current = questions }, [questions])
+  useEffect(() => { profileRef.current = profile }, [profile])
+  useEffect(() => { businessNameRef.current = businessName }, [businessName])
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
+  useEffect(() => { languageRef.current = language; customLanguageRef.current = customLanguage }, [language, customLanguage])
+  useEffect(() => { phaseRef.current = phase }, [phase])
+
+  // Auto-generate dashboard after 15 minutes of interview if no dashboard exists yet
+  useEffect(() => {
+    if (phase !== 'interview') return
+    const timer = setTimeout(async () => {
+      if (dashboardAutoFiredRef.current) return
+      if (phaseRef.current !== 'interview') return
+      if (completedSummariesRef.current.length < 2) return
+      const sid = sessionIdRef.current
+      const prof = profileRef.current
+      if (!sid || !prof) return
+      // Don't fire if a dashboard was already manually created
+      const { data: check } = await supabase.from('sessions').select('dashboard_cache').eq('id', sid).single()
+      if (check?.dashboard_cache) { dashboardAutoFiredRef.current = true; return }
+      dashboardAutoFiredRef.current = true
+      setDashboardNotifStage('first')
+      setDashboardNotif('creating')
+      triggerAutoDashboard('first', sid, prof, questionsRef.current, completedSummariesRef.current, languageRef.current, customLanguageRef.current)
+    }, 15 * 60 * 1000)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
+
   async function startSession() {
     if (!businessName.trim() || allQuestions.length === 0) return
     // Reset all interview-specific state so a new session always starts clean
@@ -250,7 +360,9 @@ export default function InterviewPage() {
     claudeResponsesRef.current = 0
     const { data } = await supabase
       .from('sessions')
-      .insert({ business_name: businessName, status: 'intro', user_id: user?.id ?? null, language: effectiveLanguage })
+      .insert({ business_name: businessName, status: 'intro', user_id: user?.id ?? null, language: effectiveLanguage, ...utmParams,
+        // v:2 marks this as a pillar-mode session — detected on resume
+        dashboard_cache: { v: 2, pillars: {} } })
       .select()
       .single()
     if (data) {
@@ -267,6 +379,7 @@ export default function InterviewPage() {
     setPhase('classifying')
 
     let detectedProfile
+    let locationPatch: { country?: string | null; city?: string | null } = {}
     try {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 40000)
@@ -281,6 +394,7 @@ export default function InterviewPage() {
       const json = await res.json()
       detectedProfile = json.profile
       trackUsage(json.usage)
+      if (json.country || json.city) locationPatch = { country: json.country ?? null, city: json.city ?? null }
     } catch {
       setAiError(true)
       setPhase('interview')
@@ -288,17 +402,6 @@ export default function InterviewPage() {
     }
     setProfile(detectedProfile)
     setAnsweredIds([])
-
-    await supabase.from('sessions').update({
-      business_description: detectedProfile.business_description,
-      business_type: detectedProfile.business_type,
-      industry: detectedProfile.industry,
-      awareness_level: detectedProfile.awareness_level,
-      owner_tone: detectedProfile.owner_tone,
-      has_employees: detectedProfile.has_employees ?? null,
-      answered_ids: [],
-      status: 'in_progress',
-    }).eq('id', sessionId)
 
     const filtered = allQuestions.filter(q => {
       if (detectedProfile.skip_questions?.includes(q.id)) return false
@@ -322,11 +425,59 @@ export default function InterviewPage() {
 
     setQuestions(orderedQuestions)
 
+    // Use the ref to avoid stale closure on sessionId state
+    const currentSessionId = sessionIdRef.current || sessionId
+    const { error: classifyUpdateError } = await supabase.from('sessions').update({
+      business_description: detectedProfile.business_description,
+      business_type: detectedProfile.business_type,
+      industry: detectedProfile.industry,
+      awareness_level: detectedProfile.awareness_level,
+      owner_tone: detectedProfile.owner_tone,
+      has_employees: detectedProfile.has_employees ?? null,
+      answered_ids: [],
+      status: 'in_progress',
+      questions_total: orderedQuestions.length,
+      ...locationPatch,
+    }).eq('id', currentSessionId)
+    if (classifyUpdateError) console.error('[classify] session update failed:', classifyUpdateError.message)
+
     const awarenessLine = detectedProfile.awareness_level === 'knows_the_gap'
       ? `You already have a sense of where the gaps are — let's see if the numbers back that up.`
       : detectedProfile.awareness_level === 'has_a_hunch'
       ? `You have a hunch something's off — let's dig into where exactly.`
       : `Let's map out the full picture and find where the opportunities are hiding.`
+
+    // ── Pillar-mode: enter first pillar after classify ────────────────────────
+    if (sessionId) {
+      const { data: fresh } = await supabase.from('sessions').select('dashboard_cache').eq('id', sessionId).single()
+      if (fresh?.dashboard_cache?.v === 2) {
+        setPillarMode(true)
+        // Reliably persist the classify profile keyed on the confirmed sessionId.
+        // The earlier update (via sessionIdRef) was not landing for pillar sessions,
+        // leaving business_type/industry/location NULL — the benchmark data we need.
+        const { error: profileSaveErr } = await supabase.from('sessions').update({
+          business_description: detectedProfile.business_description,
+          business_type: detectedProfile.business_type,
+          industry: detectedProfile.industry,
+          awareness_level: detectedProfile.awareness_level,
+          owner_tone: detectedProfile.owner_tone,
+          has_employees: detectedProfile.has_employees ?? null,
+          ...locationPatch,
+        }).eq('id', sessionId)
+        if (profileSaveErr) console.error('[classify] pillar profile save failed:', profileSaveErr.message)
+        const firstPillar = PILLAR_ORDER[0]
+        const firstQ = orderedQuestions.find(q => q.category === firstPillar)?.core_question
+          || allQuestions.find(q => q.category === firstPillar)?.core_question || ''
+        const intro = `Got it — that's really helpful context. ${awarenessLine}\n\nI'll take you through 7 areas of your business one by one. We'll go as deep as needed in each. Some will take a few minutes, some more. Just answer honestly — that's what makes this valuable.\n\n${firstQ}`
+        claudeResponsesRef.current += 1
+        setInterviewTransition(intro)
+        setConversation(prev => [...prev, { role: 'assistant', content: intro }])
+        setCurrentPillarIndex(0)
+        setPhase('interview')
+        return
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${orderedQuestions[0].core_question}`
 
@@ -416,6 +567,151 @@ export default function InterviewPage() {
     setAuthLoading(false)
   }
 
+  // ── PILLAR-MODE FUNCTIONS ──────────────────────────────────────────────────
+
+  function enterPillar(index: number, summaries: Record<string, PillarSummary>, leadingQ?: string) {
+    const pillarName = PILLAR_ORDER[index]
+    const q = leadingQ ?? allQuestions.find(q => q.category === pillarName)?.core_question ?? ''
+    setCurrentPillarIndex(index)
+    setConversation([{ role: 'assistant', content: q }])
+    setPhase('interview')
+  }
+
+  async function sendPillarMessage(userInput: string) {
+    const userMsg: Message = { role: 'user', content: userInput }
+    const newConv = [...conversation, userMsg]
+    setConversation(newConv)
+    setInput('')
+    setLoading(true)
+    setAiError(false)
+
+    const pillarName = PILLAR_ORDER[currentPillarIndex]
+    const pqs = allQuestions
+      .filter(q => q.category === pillarName)
+      .map(q => ({ id: q.id, coreQuestion: q.core_question, toolNote: q.tool_note, followUps: (q.follow_ups || []).map((f: any) => f.text) }))
+
+    const prevContext: Record<string, { contextSummary: string; entities: any }> = {}
+    for (const [name, s] of Object.entries(pillarSummariesRef.current)) {
+      prevContext[name] = { contextSummary: s.contextSummary, entities: s.entities }
+    }
+
+    const pillarPayload = {
+      pillarName,
+      pillarLabel: PILLAR_LABELS[pillarName as PillarName] || pillarName,
+      pillarQuestions: pqs,
+      pillarConversation: newConv,
+      previousPillarSummaries: prevContext,
+      businessProfile: profile,
+      language: effectiveLanguage,
+    }
+    lastPillarPayload.current = pillarPayload
+
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 40000)
+      const res = await fetch('/api/pillar-interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pillarPayload),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error('pillar API error')
+      const data = await res.json()
+      trackUsage(data.usage)
+
+      if (data.pillarComplete) {
+        await closePillar(pillarName, newConv, data.dataBacked)
+      } else {
+        const assistantMsg: Message = { role: 'assistant', content: data.message }
+        setConversation(prev => [...prev, assistantMsg])
+        // Pillar conversations are persisted in dashboard_cache.pillars on close.
+        // saveResponse uses question_id FK — synthetic IDs like 'pillar_X' would fail.
+      }
+    } catch {
+      setAiError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function closePillar(pillarName: string, finalConv: Message[], dataBacked: boolean | null) {
+    if (!sessionId || !profile) return
+    // Don't call saveResponse here — 'pillar_X' IDs fail FK constraint on responses.question_id.
+    // The full conversation is stored inside dashboard_cache.pillars[pillarName] below.
+
+    setGeneratingSummary(true)
+    const prevContext: Record<string, { contextSummary: string; entities: any }> = {}
+    for (const [name, s] of Object.entries(pillarSummariesRef.current)) {
+      prevContext[name] = { contextSummary: s.contextSummary, entities: s.entities }
+    }
+
+    let sd: any = {}
+    try {
+      const r = await fetch('/api/pillar-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pillarName,
+          pillarLabel: PILLAR_LABELS[pillarName as PillarName] || pillarName,
+          pillarConversation: finalConv,
+          previousPillarSummaries: prevContext,
+          businessProfile: profile,
+          language: effectiveLanguage,
+        }),
+      })
+      sd = await r.json()
+      trackUsage(sd.usage)
+    } catch {
+      sd = { contextSummary: `${pillarName} covered.`, entities: { tools: [], numbers: [], competitors: [], flags: [] }, confidence: 50, situation: '', recommendation: '', dataGaps: [] }
+    }
+    setGeneratingSummary(false)
+
+    const newSummary: PillarSummary = {
+      contextSummary: sd.contextSummary || '',
+      entities: sd.entities || { tools: [], numbers: [], competitors: [], flags: [] },
+      confidence: sd.confidence ?? 50,
+      situation: sd.situation || '',
+      recommendation: sd.recommendation || '',
+      dataGaps: sd.dataGaps || [],
+      completedAt: new Date().toISOString(),
+      dataBacked,
+      // Store the raw conversation so transcript + report can use it
+      conversation: finalConv,
+    }
+
+    const updated = { ...pillarSummariesRef.current, [pillarName]: newSummary }
+    setPillarSummaries(updated)
+    pillarSummariesRef.current = updated
+
+    await supabase.from('sessions').update({
+      dashboard_cache: { v: 2, pillars: updated },
+      questions_completed: Object.keys(updated).length,
+      questions_total: PILLAR_ORDER.length,
+    }).eq('id', sessionId)
+
+    const nextIndex = currentPillarIndex + 1
+    if (nextIndex >= PILLAR_ORDER.length) {
+      await supabase.from('sessions').update({ status: 'interview_done' }).eq('id', sessionId)
+      // Persist the interview-phase token usage for cost tracking (report tokens
+      // are added separately when the report generates).
+      await addSessionUsage(sessionId, { input_tokens: tokenTotals.current.input, output_tokens: tokenTotals.current.output })
+      setPhase('referral')
+    } else {
+      const key = `${pillarName}→${PILLAR_ORDER[nextIndex]}`
+      const trans = PILLAR_TRANSITIONS[key] || `Good. Let's move to ${PILLAR_LABELS[PILLAR_ORDER[nextIndex] as PillarName]}.`
+      // Solo owners get an owner-dependency opener for the People section instead
+      // of the question bank's staff/team question (which assumes employees).
+      const nextQ = (PILLAR_ORDER[nextIndex] === 'people' && profile?.has_employees === false)
+        ? "Since it's just you, let's talk about how much the business depends on you personally. If you couldn't work for two weeks, what would actually happen — could anyone step in, or would everything pause?"
+        : (allQuestions.find(q => q.category === PILLAR_ORDER[nextIndex])?.core_question || '')
+      setCurrentPillarIndex(nextIndex)
+      setConversation([{ role: 'assistant', content: `${trans}\n\n${nextQ}` }])
+    }
+  }
+
+  // ── END PILLAR-MODE FUNCTIONS ─────────────────────────────────────────────
+
   async function resumeSession(session: any) {
     setSessionId(session.id)
     setBusinessName(session.business_name)
@@ -436,6 +732,36 @@ export default function InterviewPage() {
       has_employees: session.has_employees ?? undefined,
     }
     setProfile(restoredProfile)
+
+    // ── Pillar-mode resume ───────────────────────────────────────────────────
+    if (session.dashboard_cache?.v === 2) {
+      const savedPillars: Record<string, PillarSummary> = session.dashboard_cache?.pillars || {}
+      const completedNames = Object.keys(savedPillars)
+      const nextIdx = PILLAR_ORDER.findIndex(p => !completedNames.includes(p))
+
+      setPillarMode(true)
+      setPillarSummaries(savedPillars)
+      pillarSummariesRef.current = savedPillars
+
+      if (nextIdx === -1) {
+        // All pillars done
+        setPhase('referral')
+      } else {
+        const nextPillar = PILLAR_ORDER[nextIdx]
+        const nextQ = allQuestions.find(q => q.category === nextPillar)?.core_question || ''
+        const coveredCount = completedNames.length
+        setCurrentPillarIndex(nextIdx)
+        setConversation([
+          { role: 'assistant', content: `Welcome back to ${session.business_name}! Your progress is saved — we've covered ${coveredCount} section${coveredCount !== 1 ? 's' : ''} out of ${PILLAR_ORDER.length}. If you'd like a quick recap, just ask.` },
+          { role: 'assistant', content: nextQ },
+        ])
+        setPhase('interview')
+      }
+      setShowSignIn(false)
+      setResumableSession(null)
+      return
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const filtered = allQuestions.filter(q => {
       if (!q.applies_to || q.applies_to.length === 0) return true
@@ -483,48 +809,34 @@ export default function InterviewPage() {
     }
 
     const currentQ = filtered[qIdx]
-    let resumeConv: Message[] = []
 
-    // Load in-progress conversation for the current question from sessionStorage
-    const cached = sessionStorage.getItem(`conv_${session.id}`)
-    if (cached) {
-      try {
-        const parsed: Message[] = JSON.parse(cached)
-        // Only restore if the last assistant message was for this question (not an old one)
-        if (parsed && parsed.length > 0) {
-          resumeConv = [...parsed, { role: 'assistant' as const, content: `Welcome back. Let's continue.` }]
-        }
-      } catch { /* fall through */ }
+    // Always start with a fresh chat on resume — never restore old conversation history.
+    // Restoring partial history looks like a broken/restarted session and causes confusion.
+    // Instead, give the user a clear status message so they know exactly where they are.
+    const coveredCount = summaries.length
+    const totalQ = filtered.length
+    // Only show "new areas added" message for sessions that were previously marked complete
+    // and now have new unanswered questions (re-engagement). For regular in-progress resumes,
+    // the first unanswered question is always "not in answered set" — so that check is useless.
+    const movingToNewArea = (session.status === 'completed' || session.status === 'interview_done') && firstUnansweredIdx !== -1
+
+    // Two separate bubbles: orientation first, then the question on its own line.
+    // This prevents the question from looking like part of the welcome and makes it
+    // clear it's the next thing to answer — not a repetition from a previous session.
+    const resumeConv: Message[] = []
+    if (movingToNewArea) {
+      resumeConv.push({ role: 'assistant' as const, content: `Welcome back! We've added some new areas to the diagnostic since you were last here — your previous answers are all saved.` })
+    } else if (coveredCount > 0) {
+      resumeConv.push({ role: 'assistant' as const, content: `Welcome back to ${session.business_name}! Your progress is saved — we've covered ${coveredCount} topic${coveredCount !== 1 ? 's' : ''} out of ${totalQ} so far. If you'd like a quick recap of what we discussed, just ask.` })
+    } else {
+      resumeConv.push({ role: 'assistant' as const, content: `Welcome back to ${session.business_name}. Let's continue.` })
+    }
+    if (currentQ) {
+      resumeConv.push({ role: 'assistant' as const, content: currentQ.core_question })
     }
 
-    // Fall back to Supabase: load in-progress conversation for the current question only
-    if (resumeConv.length === 0 && currentQ) {
-      const { data: currentResp } = await supabase
-        .from('responses')
-        .select('conversation')
-        .eq('session_id', session.id)
-        .eq('question_id', currentQ.id)
-        .single()
-      if (currentResp && currentResp.conversation?.length > 0) {
-        resumeConv = [
-          ...currentResp.conversation,
-          { role: 'assistant' as const, content: `Welcome back. Let's continue.` },
-        ]
-      }
-    }
-
-    // No in-progress conversation found — this is a fresh question for this session.
-    // Show a clean welcome rather than loading history from a previous question.
-    if (resumeConv.length === 0 && currentQ) {
-      const movingToNewArea = answeredIdSet.size > 0 && !answeredIdSet.has(currentQ.id)
-      resumeConv = [{
-        role: 'assistant' as const,
-        content: movingToNewArea
-          ? `Welcome back! We've added some new areas to the diagnostic since you were last here. Let's pick up where the gaps are.\n\n${currentQ.core_question}`
-          : `Welcome back to ${session.business_name}. Let's continue.\n\n${currentQ.core_question}`,
-      }]
-    }
-
+    // The question starts at the end of the welcome message array
+    questionConvStartRef.current = resumeConv.length
     setConversation(resumeConv)
     setPhase('interview')
     setShowSignIn(false)
@@ -605,6 +917,9 @@ export default function InterviewPage() {
   }
 
   async function sendInterview(userInput: string) {
+    // Route to pillar flow for new sessions
+    if (pillarMode) { await sendPillarMessage(userInput); return }
+
     const currentQ = questions[qIndex]
     const userMsg: Message = { role: 'user', content: userInput }
 
@@ -675,13 +990,36 @@ export default function InterviewPage() {
 
     if (isComplete) {
       await saveResponse(currentQ.id, newConv)
+
+      // Re-fetch the latest arrays from DB before writing.
+      // Two questions can complete within seconds of each other (e.g. a short question
+      // immediately followed by a precheck-skipped one). Both reads from React state
+      // would be stale — the second write would silently drop the first question's data.
+      // Fetching fresh DB values before each write makes the append safe.
+      const { data: latestSession } = await supabase
+        .from('sessions')
+        .select('completed_summaries, answered_ids')
+        .eq('id', sessionId)
+        .single()
+      const baseSummaries = latestSession?.completed_summaries ?? completedSummaries
+      // Merge DB answered_ids with local state. Local state may contain IDs derived from
+      // the legacy fallback (pre-answered_ids-column sessions) that were never written to DB.
+      // Taking only the DB value would erase those legacy-derived IDs on the first write,
+      // causing the session to appear to restart on the next resume.
+      const baseAnsweredIds: string[] = [
+        ...new Set([...(latestSession?.answered_ids ?? []), ...answeredIds])
+      ]
+
       const ownerReplies = newConv.filter(m => m.role === 'user').map(m => m.content).join(' / ')
-      const newSummary = { question: currentQ.core_question, summary: ownerReplies, data_backed: dataBacked }
-      const updatedSummaries = [...completedSummaries, newSummary]
+      // Capture only THIS question's user replies for the transcript (not the full cumulative history)
+      const thisQuestionMsgs = newConv.slice(questionConvStartRef.current)
+      const rawAnswer = thisQuestionMsgs.filter(m => m.role === 'user').map(m => m.content).join('\n\n')
+      const newSummary = { question: currentQ.core_question, summary: ownerReplies, data_backed: dataBacked, raw_answer: rawAnswer }
+      const updatedSummaries = [...baseSummaries, newSummary]
       setCompletedSummaries(updatedSummaries)
 
       // Track answered question IDs — this is the source of truth for resume position
-      let updatedAnsweredIds = [...answeredIds, currentQ.id]
+      let updatedAnsweredIds = [...new Set([...baseAnsweredIds, currentQ.id])]
 
       let nextIndex = qIndex + 1
       while (nextIndex < questions.length) {
@@ -689,30 +1027,50 @@ export default function InterviewPage() {
         const alreadyCovered = await checkIfAlreadyCovered(candidate, updatedSummaries)
         if (!alreadyCovered) break
         await saveResponse(candidate.id, [])
-        updatedAnsweredIds = [...updatedAnsweredIds, candidate.id]
+        updatedAnsweredIds = [...new Set([...updatedAnsweredIds, candidate.id])]
         nextIndex++
       }
       setAnsweredIds(updatedAnsweredIds)
+
+      // Halfway auto-dashboard: fires once when ≥50% of questions answered
+      if (!halfwayAutoFiredRef.current && updatedAnsweredIds.length >= Math.floor(questions.length / 2)) {
+        halfwayAutoFiredRef.current = true
+        const isFirst = !dashboardAutoFiredRef.current
+        dashboardAutoFiredRef.current = true
+        if (sessionId && profile) {
+          setDashboardNotifStage(isFirst ? 'first' : 'halfway')
+          setDashboardNotif('creating')
+          triggerAutoDashboard(isFirst ? 'first' : 'halfway', sessionId, profile, questions, updatedSummaries, language, customLanguage)
+        }
+      }
 
       const tc = transitionCount
       setTransitionCount(tc + 1)
 
       if (nextIndex >= questions.length) {
         claudeResponsesRef.current += 1
-        await supabase.from('sessions').update({ status: 'interview_done', answered_ids: updatedAnsweredIds }).eq('id', sessionId)
+        await supabase.from('sessions').update({
+          status: 'interview_done',
+          answered_ids: updatedAnsweredIds,
+          questions_completed: updatedAnsweredIds.length,
+          questions_total: questions.length,
+        }).eq('id', sessionId)
         setConversation(prev => [...prev, {
           role: 'assistant',
           content: `That's everything I need. Building your report now...`,
         }])
-        setPhase('done')
-        setTimeout(() => {
-          window.location.href = `/results?session=${sessionId}`
-        }, 2000)
+        // Silent final dashboard refresh before redirecting to report
+        if (sessionId && profile) {
+          triggerAutoDashboard('end', sessionId, profile, questions, updatedSummaries, language, customLanguage)
+        }
+        setPhase('referral')
       } else {
         await supabase.from('sessions').update({
           current_q_index: nextIndex,
           completed_summaries: updatedSummaries,
           answered_ids: updatedAnsweredIds,
+          questions_completed: updatedAnsweredIds.length,
+          questions_total: questions.length,
         }).eq('id', sessionId)
 
         const nextQ = questions[nextIndex]
@@ -721,6 +1079,8 @@ export default function InterviewPage() {
         const updatedConv = [...newConv, transitionMsg]
         setConversation(prev => [...prev, transitionMsg])
         if (sessionId) sessionStorage.setItem(`conv_${sessionId}`, JSON.stringify(updatedConv))
+        // Mark where the next question starts so we can extract only its replies for raw_answer
+        questionConvStartRef.current = updatedConv.length
         setQIndex(nextIndex)
 
         // Count this API response and show save overlay at the 5th response (once only)
@@ -780,6 +1140,79 @@ export default function InterviewPage() {
     setLoading(false)
   }
 
+  async function triggerAutoDashboard(
+    stage: 'first' | 'halfway' | 'end',
+    sid: string,
+    prof: BusinessProfile,
+    qs: Question[],
+    summaries: { question: string; summary: string; data_backed?: boolean | null }[],
+    lang: string,
+    customLang?: string
+  ) {
+    if (qs.length === 0) return
+    const effectiveLang = lang === 'en' ? 'English' : lang === 'nl' ? 'Dutch' : (customLang?.trim() || 'English')
+
+    // Build categoryData from current filtered questions + completed summaries
+    const categoryOrder: string[] = []
+    const catQMap = new Map<string, string[]>()
+    qs.forEach(q => {
+      if (!q.category) return
+      if (!catQMap.has(q.category)) { catQMap.set(q.category, []); categoryOrder.push(q.category) }
+      catQMap.get(q.category)!.push(q.core_question)
+    })
+    const summaryMap = new Map(summaries.map(s => [s.question, { summary: s.summary, data_backed: s.data_backed ?? null }]))
+    const categoryData = categoryOrder.map(cat => {
+      const catQs = catQMap.get(cat) || []
+      return {
+        name: cat,
+        covered: catQs.filter(q => summaryMap.has(q)).map(q => ({
+          question: q,
+          summary: summaryMap.get(q)!.summary,
+          data_backed: summaryMap.get(q)!.data_backed,
+        })),
+        uncovered: catQs.filter(q => !summaryMap.has(q)),
+      }
+    })
+
+    try {
+      const res = await fetch('/api/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessName: prof.business_description ? businessNameRef.current : '',
+          businessType: prof.business_type,
+          industry: prof.industry,
+          businessDescription: prof.business_description,
+          ownerTone: prof.owner_tone,
+          categoryData,
+          language: effectiveLang,
+        }),
+      })
+      const data = await res.json()
+      if (data.categories) {
+        await supabase.from('sessions').update({
+          dashboard_cache: { categories: data.categories, emerging_picture: data.emerging_picture ?? null },
+          dashboard_cache_count: summaries.length,
+        }).eq('id', sid)
+      }
+      if (stage !== 'end') {
+        setDashboardNotif('ready')
+        setTimeout(() => setDashboardNotif('idle'), 9000)
+      }
+    } catch {
+      if (stage !== 'end') setDashboardNotif('idle')
+    }
+  }
+
+  async function handleReferral(source: string | null) {
+    if (sessionId && source) {
+      await supabase.from('sessions').update({ referral_source: source }).eq('id', sessionId)
+    }
+    // Land on the client hub — it builds the report on first arrival, then
+    // surfaces the report, pillar deep-dive, and transcript in one place.
+    window.location.href = `/hub?session=${sessionId}`
+  }
+
   async function send() {
     if (!input.trim() || loading) return
     if (phase === 'intro') await sendIntro(input)
@@ -787,6 +1220,39 @@ export default function InterviewPage() {
   }
 
   async function retryLastMessage() {
+    // Pillar-mode retry
+    if (pillarMode && lastPillarPayload.current) {
+      setAiError(false)
+      setLoading(true)
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 40000)
+        const res = await fetch('/api/pillar-interview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(lastPillarPayload.current),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (!res.ok) throw new Error('retry failed')
+        const data = await res.json()
+        trackUsage(data.usage)
+        const payload = lastPillarPayload.current as any
+        if (data.pillarComplete) {
+          await closePillar(payload.pillarName, payload.pillarConversation, data.dataBacked)
+        } else {
+          const assistantMsg: Message = { role: 'assistant', content: data.message }
+          setConversation(prev => [...prev, assistantMsg])
+          // No saveResponse — FK constraint on question_id prevents synthetic pillar IDs
+        }
+      } catch {
+        setAiError(true)
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!lastPayload.current) return
     setAiError(false)
     setLoading(true)
@@ -819,9 +1285,10 @@ export default function InterviewPage() {
       await saveResponse(currentQ.id, conversation)
       if (qIndex + 1 >= questions.length) {
         await supabase.from('sessions').update({ status: 'interview_done' }).eq('id', sessionId)
+        await addSessionUsage(sessionId, { input_tokens: tokenTotals.current.input, output_tokens: tokenTotals.current.output })
         setConversation(prev => [...prev, { role: 'assistant', content: "That's everything — thank you. Building your report now..." }])
         setPhase('done')
-        setTimeout(() => { window.location.href = `/results?session=${sessionId}` }, 2000)
+        setTimeout(() => { window.location.href = `/hub?session=${sessionId}` }, 2000)
       } else {
         const nextQ = questions[qIndex + 1]
         setConversation(prev => [...prev, { role: 'assistant', content: `Got it. Moving on.\n\n${nextQ.core_question}` }])
@@ -841,7 +1308,7 @@ export default function InterviewPage() {
     : language === 'nl' ? 'Dutch'
     : customLanguage.trim() || 'English'
 
-  const progress = questions.length > 0 ? Math.round((qIndex / questions.length) * 100) : 0
+  // progress bar removed — used completedSummaries count instead (qIndex is not a reliable proxy)
 
   // Build deduplicated category list — each unique category appears once, tracking all its indices
   const categoryFlow: CatInfo[] = []
@@ -1066,6 +1533,43 @@ export default function InterviewPage() {
     )
   }
 
+  // ─── REFERRAL ────────────────────────────────────────────────────────────────
+
+  if (phase === 'referral') {
+    const REFERRAL_OPTIONS = ['Google search', 'Friend or colleague', 'LinkedIn', 'Social media', 'Other']
+    return (
+      <div style={cardWrap}>
+        <div style={card}>
+          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ONE LAST THING</div>
+          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>How did you find us?</h2>
+          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 20, lineHeight: 1.6 }}>
+            Helps us reach more business owners like you.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {REFERRAL_OPTIONS.map(opt => (
+              <button
+                key={opt}
+                onClick={() => handleReferral(opt)}
+                style={{
+                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 8,
+                  padding: '11px 16px', color: '#C8C8B0', fontFamily: 'monospace',
+                  fontSize: 13, cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.4)'; e.currentTarget.style.color = '#C8A96E' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#2A2A1E'; e.currentTarget.style.color = '#C8C8B0' }}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => handleReferral(null)} style={ghostBtn}>
+            Skip → View my report
+          </button>
+        </div>
+      </div>
+    )
+  }
+
 
   // ─── INTERVIEW ───────────────────────────────────────────────────────────────
 
@@ -1119,6 +1623,21 @@ export default function InterviewPage() {
             ⚠ save progress
           </button>
         )}
+        {phase === 'interview' && sessionId && (
+          <button
+            className="pocket-mobile-dash"
+            onClick={() => window.location.href = `/dashboard?session=${sessionId}`}
+            style={{
+              background: 'transparent', border: '1px solid #1E1E14',
+              borderRadius: 5, padding: '4px 10px', cursor: 'pointer',
+              color: '#4A4A38', fontFamily: 'monospace', fontSize: 10,
+              letterSpacing: '0.06em', display: 'none',
+            }}
+          >
+            ⊞ Dashboard
+          </button>
+        )}
+        <style>{`@media (max-width: 639px) { .pocket-mobile-dash { display: inline-flex !important; } }`}</style>
         {phase === 'interview' && (
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
             {typeof window !== 'undefined' && window.location.search.includes('debug=1') && (
@@ -1130,18 +1649,52 @@ export default function InterviewPage() {
                 ↑{tokenTotals.current.input.toLocaleString()} ↓{tokenTotals.current.output.toLocaleString()} tok
               </span>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 80, height: 3, background: '#1A1A14', borderRadius: 2 }}>
-                <div style={{ width: `${progress}%`, height: '100%', background: '#C8A96E', borderRadius: 2, transition: 'width 0.5s' }} />
-              </div>
-              <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#4A4A38' }}>{qIndex}/{questions.length}</span>
-            </div>
+            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#3A3A28' }}>
+              {pillarMode
+                ? `${Object.keys(pillarSummaries).length} of ${PILLAR_ORDER.length} sections`
+                : `${completedSummaries.length} of ${questions.length} topics`}
+            </span>
           </div>
         )}
       </div>
 
-      {/* Category flow strip */}
-      {phase === 'interview' && categoryFlow.length > 1 && (
+      {/* Pillar progress strip (pillar mode) */}
+      {phase === 'interview' && pillarMode && (
+        <div style={{
+          background: '#0A0A07', borderBottom: '1px solid #111110',
+          padding: '6px 16px', display: 'flex', gap: 4, overflowX: 'auto',
+          flexShrink: 0, alignItems: 'center',
+        }}>
+          {PILLAR_ORDER.map((p, i) => {
+            const done = !!pillarSummaries[p]
+            const active = i === currentPillarIndex && !done
+            return (
+              <div key={p} style={{
+                padding: '3px 10px', borderRadius: 12, fontSize: 10, fontFamily: 'monospace',
+                letterSpacing: '0.05em', whiteSpace: 'nowrap', flexShrink: 0,
+                background: done ? '#0A120A' : active ? '#1A1A10' : 'transparent',
+                border: `1px solid ${done ? '#2A4A2A' : active ? '#3A3A20' : '#1A1A14'}`,
+                color: done ? '#4A8A4A' : active ? '#C8A96E' : '#2A2A1E',
+              }}>
+                {done ? '✓ ' : ''}{PILLAR_LABELS[p as PillarName]}
+              </div>
+            )
+          })}
+          {generatingSummary && (
+            <span style={{
+              marginLeft: 8, fontFamily: 'monospace', fontSize: 10, color: '#C8A96E',
+              background: '#1E1A10', border: '1px solid #C8A96E30',
+              borderRadius: 10, padding: '1px 8px',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
+              ✦ Building section summary…
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Category flow strip (legacy mode) */}
+      {phase === 'interview' && !pillarMode && categoryFlow.length > 1 && (
         <div style={{
           background: '#0A0A07', borderBottom: '1px solid #111110',
           padding: '6px 16px', display: 'flex', gap: 4, overflowX: 'auto',
@@ -1238,6 +1791,40 @@ export default function InterviewPage() {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* Auto-dashboard notification */}
+      {phase === 'interview' && dashboardNotif !== 'idle' && (
+        <div style={{
+          flexShrink: 0, background: '#0E0E0C',
+          borderTop: '1px solid rgba(200,169,110,0.2)',
+          borderBottom: '1px solid rgba(200,169,110,0.08)',
+          padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              color: dashboardNotif === 'ready' ? '#7EB8A4' : '#C8A96E',
+              fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginBottom: 5,
+            }}>
+              {dashboardNotif === 'creating'
+                ? (dashboardNotifStage === 'first' ? '✦ CREATING YOUR DASHBOARD' : '✦ UPDATING YOUR DASHBOARD')
+                : (dashboardNotifStage === 'first' ? '✓ DASHBOARD READY' : '✓ DASHBOARD UPDATED')}
+            </div>
+            <div style={{ color: '#6A6A50', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.55 }}>
+              {dashboardNotif === 'creating' && dashboardNotifStage === 'first'
+                ? 'Your first findings are being mapped — usually takes 20–30 seconds. Find the dashboard in the grid icon (⊞) on the left once it\'s ready.'
+                : dashboardNotif === 'creating'
+                ? 'Adding your latest answers for more up-to-date insights. Find the dashboard in the grid icon (⊞) on the left.'
+                : dashboardNotifStage === 'first'
+                ? 'Your first insights are ready. Open the dashboard from the grid icon (⊞) on the left.'
+                : 'New answers have been added. Open the dashboard from the grid icon (⊞) on the left to see updated insights.'}
+            </div>
+          </div>
+          <button
+            onClick={() => setDashboardNotif('idle')}
+            style={{ background: 'none', border: 'none', color: '#3A3A28', cursor: 'pointer', fontFamily: 'monospace', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
+          >✕</button>
+        </div>
+      )}
 
       {/* Input */}
       {(phase === 'intro' || phase === 'interview') && (

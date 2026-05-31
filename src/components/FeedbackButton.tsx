@@ -87,7 +87,9 @@ export default function FeedbackButton({ sessionId, context }: Props) {
   const mono: React.CSSProperties = { fontFamily: 'monospace' }
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 200 }}>
+    <>
+    <style>{`@media (max-width: 639px) { .pocket-feedback-wrap { bottom: 88px !important; } }`}</style>
+    <div className="pocket-feedback-wrap" style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 200 }}>
       {open && (
         <div style={{
           position: 'absolute', bottom: 48, right: 0, width: 290,
@@ -182,5 +184,6 @@ export default function FeedbackButton({ sessionId, context }: Props) {
         ?
       </button>
     </div>
+    </>
   )
 }

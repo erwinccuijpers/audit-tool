@@ -17,7 +17,32 @@ type Session = {
   created_at: string
   user_id?: string | null
   admin_analysis?: any
+  dashboard_cache?: any
+  questions_completed?: number
+  input_tokens?: number | null
+  output_tokens?: number | null
+  cost_usd?: number | null
+  niche?: string | null
+  employee_count?: number | null
+  size_band?: string | null
+  revenue_band?: string | null
+  years_in_business?: number | null
+  region?: string | null
+  country?: string | null
+  city?: string | null
+  scores?: Record<string, number> | null
 }
+
+// True for new pillar-architecture sessions
+const isPillarSession = (s: Session) => s.dashboard_cache?.v === 2
+// Data count: number of covered topics/pillars
+const topicCount = (s: Session) => isPillarSession(s)
+  ? Object.keys(s.dashboard_cache?.pillars || {}).length
+  : (s.completed_summaries || []).length
+// Has any interview data
+const sessionHasData = (s: Session) => topicCount(s) > 0
+// Is completed (both old and new status values)
+const isCompleted = (s: Session) => s.status === 'completed' || s.status === 'interview_done'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
@@ -50,190 +75,328 @@ function SectionLabel({ children }: { children: string }) {
   )
 }
 
-function PatternsView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: string }) {
-  const [result, setResult] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
-  const [cacheLoading, setCacheLoading] = useState(true)
-  const [fromCache, setFromCache] = useState(false)
-  const [cachedAt, setCachedAt] = useState<string | null>(null)
-  const [error, setError] = useState('')
+const BUCKET_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people', 'outliers'] as const
+type BucketName = typeof BUCKET_ORDER[number]
 
-  // Load cached patterns on mount
+type PatternIssue = {
+  id: string
+  description: string
+  count: number
+  affected: { session_id: string; business_name: string; quote: string }[]
+}
+
+type ProcessedMeta = { summary_count: number; processed_at: string }
+type BucketCache = {
+  buckets: Partial<Record<BucketName, { issues: PatternIssue[] }>>
+  processed_sessions: Record<string, ProcessedMeta>
+}
+
+function IssueCard({ issue, isOutlier, onMove }: {
+  issue: PatternIssue
+  isOutlier: boolean
+  onMove?: (issueId: string, toBucket: BucketName) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ borderBottom: '1px solid #141412', paddingBottom: 10, marginBottom: 10 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span style={{
+          ...mono, fontSize: 13, color: '#C8A96E', minWidth: 24, textAlign: 'right', flexShrink: 0,
+        }}>{issue.count}×</span>
+        <div style={{ flex: 1 }}>
+          <span style={{ color: '#B0A890', fontSize: 13, lineHeight: 1.5 }}>{issue.description}</span>
+        </div>
+        <span style={{ ...mono, fontSize: 9, color: '#2A2A1E', flexShrink: 0, paddingTop: 3 }}>
+          {open ? '▲' : '▼'}
+        </span>
+      </div>
+
+      {open && (
+        <div style={{ paddingLeft: 34, marginTop: 10 }}>
+          {/* Businesses */}
+          <div style={{ ...mono, fontSize: 9, letterSpacing: '0.1em', color: '#3A3A28', marginBottom: 8 }}>
+            BUSINESSES AFFECTED
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: isOutlier ? 12 : 0 }}>
+            {issue.affected.map((a, i) => (
+              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{ flex: '0 0 130px' }}>
+                  <div style={{ color: '#9A9080', fontSize: 12 }}>{a.business_name}</div>
+                  <a
+                    href={`/?session=${a.session_id}`}
+                    onClick={e => e.stopPropagation()}
+                    style={{ ...mono, fontSize: 9, color: '#3A3A28', textDecoration: 'none' }}
+                  >view →</a>
+                </div>
+                <div style={{ flex: 1, color: '#4A4A38', ...mono, fontSize: 11, lineHeight: 1.5, fontStyle: 'italic' }}>
+                  "{a.quote}"
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Move to bucket (outliers only) */}
+          {isOutlier && onMove && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ ...mono, fontSize: 10, color: '#3A3A28' }}>Move to →</span>
+              <select
+                defaultValue=""
+                onChange={e => { if (e.target.value) onMove(issue.id, e.target.value as BucketName) }}
+                onClick={e => e.stopPropagation()}
+                style={{
+                  background: '#0C0C09', border: '1px solid #1E1E14', borderRadius: 4,
+                  color: '#C8A96E', ...mono, fontSize: 11, padding: '4px 8px', cursor: 'pointer',
+                }}
+              >
+                <option value="">select bucket…</option>
+                {BUCKET_ORDER.filter(b => b !== 'outliers').map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessionsLoading }: { sessions: Session[]; isFullAdmin: boolean; onReloadSessions: () => Promise<void>; sessionsLoading: boolean }) {
+  const [cache, setCache] = useState<BucketCache | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [processing, setProcessing] = useState(false)
+  const [processMsg, setProcessMsg] = useState('')
+  const [openBuckets, setOpenBuckets] = useState<Set<string>>(new Set(['retention', 'acquisition']))
+
+  const processedSessions = cache?.processed_sessions ?? {}
+  const unprocessedCount = sessions.filter(s => {
+    const currentCount = topicCount(s)   // handles both pillar and legacy sessions
+    if (currentCount === 0) return false
+    const prev = processedSessions[s.id]
+    return !prev || currentCount > prev.summary_count
+  }).length
+
   useEffect(() => {
     supabase
       .from('admin_cache')
-      .select('data, sessions_count, updated_at')
-      .eq('key', 'patterns')
+      .select('data')
+      .eq('key', 'pattern_slots')
       .single()
       .then(({ data }) => {
-        if (data?.data) {
-          setResult(data.data)
-          setFromCache(true)
-          setCachedAt(data.updated_at)
-        }
-        setCacheLoading(false)
+        if (data?.data?.buckets) setCache(data.data)
+        setLoading(false)
       })
   }, [])
 
-  async function generate() {
-    setLoading(true)
-    setError('')
-    setFromCache(false)
-    const withData = sessions.filter(s => (s.completed_summaries || []).length > 0)
-    const res = await fetch('/api/admin', {
+  async function processNew() {
+    setProcessing(true)
+    setProcessMsg('')
+    const res = await fetch('/api/pattern-match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'patterns', sessions, adminEmail }),
+      body: JSON.stringify({}),
     })
     const data = await res.json()
-    if (data.error) { setError(data.error); setLoading(false); return }
-    setResult(data.result)
-    // Save to cache
-    await supabase.from('admin_cache').upsert({
-      key: 'patterns',
-      data: data.result,
-      sessions_count: withData.length,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'key' })
-    setCachedAt(new Date().toISOString())
-    setLoading(false)
+    if (data.error) { setProcessMsg(`Error: ${data.error}`); setProcessing(false); return }
+    setProcessMsg(`Processed ${data.processed} session${data.processed !== 1 ? 's' : ''} — ${data.totalIssues} issues total`)
+    const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', 'pattern_slots').single()
+    if (refreshed?.data?.buckets) setCache(refreshed.data)
+    setProcessing(false)
   }
 
-  const withData = sessions.filter(s => (s.completed_summaries || []).length > 0)
+  async function moveIssue(issueId: string, toBucket: BucketName) {
+    if (!cache) return
+    const outlierIssues = cache.buckets.outliers?.issues ?? []
+    const issue = outlierIssues.find(i => i.id === issueId)
+    if (!issue) return
+
+    const updated: BucketCache = {
+      ...cache,
+      buckets: {
+        ...cache.buckets,
+        outliers: { issues: outlierIssues.filter(i => i.id !== issueId) },
+        [toBucket]: {
+          issues: [...(cache.buckets[toBucket]?.issues ?? []), issue].sort((a, b) => b.count - a.count),
+        },
+      },
+    }
+    setCache(updated)
+
+    // Persist
+    await supabase.from('admin_cache').upsert(
+      { key: 'pattern_slots', data: updated, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    )
+    setOpenBuckets(prev => new Set([...prev, toBucket]))
+  }
+
+  function toggleBucket(b: string) {
+    setOpenBuckets(prev => {
+      const next = new Set(prev)
+      next.has(b) ? next.delete(b) : next.add(b)
+      return next
+    })
+  }
+
+  const totalIssues = cache
+    ? BUCKET_ORDER.reduce((n, b) => n + (cache.buckets[b]?.issues.length ?? 0), 0)
+    : 0
+
+  if (loading) {
+    return <div style={{ ...mono, fontSize: 12, color: '#3A3A28', padding: '40px 0', textAlign: 'center' }}>Loading…</div>
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <button
-          onClick={generate}
-          disabled={loading || cacheLoading || withData.length === 0}
+          onClick={async () => {
+            setProcessMsg('')
+            await onReloadSessions()
+            const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', 'pattern_slots').single()
+            if (refreshed?.data?.buckets) setCache(refreshed.data)
+          }}
+          disabled={sessionsLoading || processing}
+          title="Re-check Supabase for new completed sessions"
           style={{
-            background: loading ? '#1A1A14' : '#C8A96E',
-            border: 'none', borderRadius: 6, padding: '10px 20px',
-            color: loading ? '#4A4A38' : '#0C0C09', ...mono, fontSize: 12,
-            fontWeight: 500, cursor: loading ? 'default' : 'pointer',
+            background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
+            padding: '9px 16px', color: sessionsLoading ? '#3A3A28' : '#8A8070',
+            ...mono, fontSize: 12, cursor: sessionsLoading || processing ? 'default' : 'pointer',
           }}
         >
-          {loading ? 'Analysing...' : result ? '↺ Regenerate' : '▶ Generate analysis'}
+          {sessionsLoading ? 'Reloading…' : '↻ Reload data'}
         </button>
+        {isFullAdmin && (
+          <button
+            onClick={processNew}
+            disabled={processing || unprocessedCount === 0}
+            style={{
+              background: processing || unprocessedCount === 0 ? '#1A1A14' : '#C8A96E',
+              border: 'none', borderRadius: 6, padding: '9px 18px',
+              color: processing || unprocessedCount === 0 ? '#3A3A28' : '#0C0C09',
+              ...mono, fontSize: 12, cursor: processing || unprocessedCount === 0 ? 'default' : 'pointer',
+            }}
+          >
+            {processing ? 'Processing…' : unprocessedCount > 0
+              ? `▶ Process ${unprocessedCount} session${unprocessedCount !== 1 ? 's' : ''}`
+              : '✓ Up to date'}
+          </button>
+        )}
         <span style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>
-          {withData.length} sessions with data / {sessions.length} total
+          {totalIssues} issue{totalIssues !== 1 ? 's' : ''} · {Object.keys(processedSessions).length} sessions in database
         </span>
-        {fromCache && cachedAt && (
-          <span style={{ ...mono, fontSize: 10, color: '#2A2A1E' }}>
-            cached {new Date(cachedAt).toLocaleDateString()}
+        {processMsg && (
+          <span style={{ ...mono, fontSize: 11, color: processMsg.startsWith('Error') ? '#C07050' : '#6A9A6A' }}>
+            {processMsg}
           </span>
         )}
       </div>
 
-      {error && <div style={{ ...mono, fontSize: 12, color: '#C07050' }}>{error}</div>}
-
-      {result && (
-        <>
-          {/* Meta observation */}
-          {result.meta_observation && (
-            <div style={card()}>
-              <SectionLabel>META OBSERVATION</SectionLabel>
-              <p style={{ color: '#C8A96E', fontSize: 14, lineHeight: 1.7, margin: 0, fontFamily: 'Georgia, serif' }}>
-                {result.meta_observation}
-              </p>
+      {/* Top 5 most common issues */}
+      {totalIssues > 0 && (() => {
+        const top5 = BUCKET_ORDER
+          .flatMap(b => (cache?.buckets[b]?.issues ?? []).map(iss => ({ ...iss, bucket: b })))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5)
+        return (
+          <div style={card({ padding: '14px 16px' })}>
+            <div style={{ ...mono, fontSize: 9, letterSpacing: '0.12em', color: '#3A3A28', marginBottom: 12 }}>
+              TOP ISSUES ACROSS ALL CLIENTS
             </div>
-          )}
-
-          {/* Top pain points */}
-          {result.top_pain_points?.length > 0 && (
-            <div style={card()}>
-              <SectionLabel>TOP PAIN POINTS</SectionLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {result.top_pain_points.map((p: any, i: number) => (
-                  <div key={i} style={{ borderBottom: '1px solid #161612', paddingBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ color: '#D0C8B8', ...mono, fontSize: 13 }}>{p.issue}</span>
-                      <span style={tag('#C8A96E', '#120E08')}>{p.count}×</span>
-                    </div>
-                    {p.examples?.length > 0 && (
-                      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {p.examples.map((ex: string, j: number) => (
-                          <li key={j} style={{ color: '#4A4A38', ...mono, fontSize: 11, paddingLeft: 12, position: 'relative' }}>
-                            <span style={{ position: 'absolute', left: 0 }}>·</span>{ex}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Behavioral patterns */}
-          {result.behavioral_patterns?.length > 0 && (
-            <div style={card()}>
-              <SectionLabel>BEHAVIORAL PATTERNS</SectionLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {result.behavioral_patterns.map((p: any, i: number) => (
-                  <div key={i} style={{ borderBottom: '1px solid #161612', paddingBottom: 12 }}>
-                    <div style={{ color: '#C8A96E', ...mono, fontSize: 12, marginBottom: 4 }}>{p.pattern}</div>
-                    <div style={{ color: '#7A7A5A', fontSize: 13, lineHeight: 1.6, marginBottom: 6, fontFamily: 'Georgia, serif' }}>{p.description}</div>
-                    {p.examples?.length > 0 && (
-                      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {p.examples.map((ex: string, j: number) => (
-                          <li key={j} style={{ color: '#3A3A28', ...mono, fontSize: 11, paddingLeft: 12, position: 'relative' }}>
-                            <span style={{ position: 'absolute', left: 0 }}>·</span>{ex}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {/* Knowledge gaps */}
-            {result.knowledge_gaps?.length > 0 && (
-              <div style={card()}>
-                <SectionLabel>KNOWLEDGE GAPS</SectionLabel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {result.knowledge_gaps.map((g: any, i: number) => (
-                    <div key={i}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <span style={{ color: '#D0C8B8', ...mono, fontSize: 12 }}>{g.area}</span>
-                        <span style={tag('#9A7A4A', '#100C06')}>{g.frequency}×</span>
-                      </div>
-                      <div style={{ color: '#3A3A28', ...mono, fontSize: 11, lineHeight: 1.5 }}>{g.description}</div>
-                    </div>
-                  ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {top5.map((iss, i) => (
+                <div key={iss.id} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                  <span style={{ ...mono, fontSize: 10, color: '#2A2A1E', minWidth: 14 }}>{i + 1}.</span>
+                  <span style={{ flex: 1, color: '#B0A890', fontSize: 13, lineHeight: 1.4 }}>{iss.description}</span>
+                  <span style={{
+                    ...mono, fontSize: 10, color: '#3A3A28',
+                    background: '#1A1A14', border: '1px solid #222218',
+                    borderRadius: 3, padding: '1px 6px', flexShrink: 0,
+                  }}>{iss.bucket}</span>
+                  <span style={{ ...mono, fontSize: 12, color: '#C8A96E', minWidth: 24, textAlign: 'right', flexShrink: 0 }}>
+                    {iss.count}×
+                  </span>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
-            {/* Quick wins */}
-            {result.quick_wins?.length > 0 && (
-              <div style={card()}>
-                <SectionLabel>QUICK WIN OPPORTUNITIES</SectionLabel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {result.quick_wins.map((q: any, i: number) => {
-                    const e = effortColor(q.effort)
-                    const imp = effortColor(q.impact)
-                    return (
-                      <div key={i}>
-                        <div style={{ color: '#D0C8B8', ...mono, fontSize: 12, marginBottom: 4 }}>{q.opportunity}</div>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <span style={tag(e.color, e.bg)}>effort: {q.effort}</span>
-                          <span style={tag(imp.color, imp.bg)}>impact: {q.impact}</span>
-                          {q.applicable_to && <span style={tag('#5A5A48', '#101010')}>{q.applicable_to}</span>}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+      {/* Empty state */}
+      {totalIssues === 0 && !processing && (
+        <div style={card({ textAlign: 'center', padding: '40px 20px' })}>
+          <div style={{ ...mono, fontSize: 12, color: '#3A3A28', marginBottom: 6 }}>No issues classified yet</div>
+          <div style={{ ...mono, fontSize: 11, color: '#2A2A1E' }}>
+            {sessions.some(s => (s.completed_summaries || []).length > 0)
+              ? 'Click "Process sessions" to classify issues from interviews into category buckets.'
+              : 'Issues appear once sessions have data.'}
+          </div>
+        </div>
+      )}
+
+      {/* Category buckets */}
+      {BUCKET_ORDER.map(bucketName => {
+        const issues = cache?.buckets[bucketName]?.issues ?? []
+        const isOpen = openBuckets.has(bucketName)
+        const isOutlier = bucketName === 'outliers'
+        const bucketLabel = bucketName.charAt(0).toUpperCase() + bucketName.slice(1)
+
+        return (
+          <div key={bucketName} style={card({ padding: 0 })}>
+            {/* Bucket header */}
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 16px', cursor: 'pointer',
+                borderBottom: isOpen && issues.length > 0 ? '1px solid #161614' : 'none',
+              }}
+              onClick={() => toggleBucket(bucketName)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  ...mono, fontSize: 10, letterSpacing: '0.12em',
+                  color: isOutlier ? '#4A4A38' : issues.length > 0 ? '#C8A96E' : '#2A2A1E',
+                }}>
+                  {bucketLabel.toUpperCase()}
+                </span>
+                {issues.length > 0 && (
+                  <span style={{
+                    background: isOutlier ? '#1A1A14' : '#1E1A10',
+                    border: `1px solid ${isOutlier ? '#2A2A20' : '#C8A96E30'}`,
+                    borderRadius: 10, padding: '1px 7px',
+                    ...mono, fontSize: 10, color: isOutlier ? '#4A4A38' : '#C8A96E',
+                  }}>
+                    {issues.length} issue{issues.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              <span style={{ ...mono, fontSize: 10, color: '#2A2A1E' }}>
+                {issues.length === 0 ? 'no issues yet' : isOpen ? '▲' : '▼'}
+              </span>
+            </div>
+
+            {/* Issues list */}
+            {isOpen && issues.length > 0 && (
+              <div style={{ padding: '14px 16px' }}>
+                {issues.map(issue => (
+                  <IssueCard
+                    key={issue.id}
+                    issue={issue}
+                    isOutlier={isOutlier}
+                    onMove={isOutlier ? moveIssue : undefined}
+                  />
+                ))}
               </div>
             )}
           </div>
-        </>
-      )}
+        )
+      })}
     </div>
   )
 }
@@ -242,10 +405,17 @@ function FunnelView({ sessions }: { sessions: Session[] }) {
   const total = sessions.length
   const anyActivity = sessions.filter(s => (s.current_q_index || 0) > 0).length
   const reachedQ6 = sessions.filter(s => (s.current_q_index || 0) >= 6).length
-  const hasSummaries = sessions.filter(s => (s.completed_summaries || []).length > 0).length
-  const completed = sessions.filter(s => s.status === 'completed').length
+  const hasSummaries = sessions.filter(sessionHasData).length
+  const completed = sessions.filter(isCompleted).length
   const authenticated = sessions.filter(s => s.user_id != null).length
   const anonymous = sessions.filter(s => s.user_id == null).length
+
+  // Cost overview (only sessions that have stored token usage)
+  const totalCost = sessions.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
+  const completedWithCost = sessions.filter(s => isCompleted(s) && s.cost_usd != null)
+  const avgCompletedCost = completedWithCost.length > 0
+    ? completedWithCost.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0) / completedWithCost.length
+    : 0
 
   // Drop-off distribution: bucket current_q_index into ranges
   const buckets = [
@@ -296,6 +466,8 @@ function FunnelView({ sessions }: { sessions: Session[] }) {
           { label: 'ANONYMOUS', value: anonymous },
           { label: 'WITH SUMMARIES', value: hasSummaries },
           { label: 'COMPLETED', value: completed },
+          { label: 'TOTAL COST', value: `$${totalCost.toFixed(2)}` },
+          { label: 'AVG / COMPLETED', value: `$${avgCompletedCost.toFixed(2)}` },
         ].map(({ label: lbl, value }) => (
           <div key={lbl} style={card({ textAlign: 'center', padding: '14px 12px' })}>
             <div style={{ color: '#D0C8B8', fontFamily: 'monospace', fontSize: 22, fontWeight: 300, marginBottom: 4 }}>{value}</div>
@@ -371,6 +543,126 @@ type RawResponse = {
   updated_at: string
 }
 
+// ── Admin transcript modal ──────────────────────────────────────────────────
+// Standalone admin view — reconstructs the full conversation without leaving
+// the admin context (the old "transcript ↗" link routed into the client app).
+const TRANSCRIPT_PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+const TRANSCRIPT_PILLAR_LABELS: Record<string, string> = {
+  positioning: 'Positioning', acquisition: 'Acquisition', retention: 'Retention',
+  revenue: 'Revenue', strategy: 'Strategy', tools: 'Tools & Systems', people: 'People',
+}
+
+function TranscriptModal({ session, onClose }: { session: Session; onClose: () => void }) {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [loading, setLoading] = useState(true)
+  const [empty, setEmpty] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function build() {
+      // ── Pillar-mode v:2 — reconstruct from stored pillar conversations ──
+      if (isPillarSession(session)) {
+        const pillars: Record<string, any> = session.dashboard_cache?.pillars || {}
+        const combined: Message[] = []
+        for (const name of TRANSCRIPT_PILLAR_ORDER) {
+          const p = pillars[name]
+          if (!p) continue
+          const conv: Message[] = p.conversation || []
+          if (conv.length === 0) continue
+          combined.push({ role: 'assistant', content: `— ${TRANSCRIPT_PILLAR_LABELS[name] || name} —` })
+          combined.push(...conv)
+        }
+        while (combined.length > 0 && combined[combined.length - 1].role === 'assistant') combined.pop()
+        if (!cancelled) { setMessages(combined); setEmpty(combined.length === 0); setLoading(false) }
+        return
+      }
+
+      // ── Legacy mode — reconstruct from responses table ──
+      const { data: responses } = await supabase
+        .from('responses')
+        .select('conversation, created_at')
+        .eq('session_id', session.id)
+        .order('created_at')
+
+      let all: Message[] = []
+      let currentBest: Message[] = []
+      let prevMax = 0
+      for (const r of responses || []) {
+        const conv: Message[] = (r.conversation as Message[]) || []
+        if (conv.length === 0) continue
+        if (conv.length < prevMax) { all = [...all, ...currentBest]; currentBest = conv; prevMax = conv.length }
+        else { currentBest = conv; prevMax = conv.length }
+      }
+      if (currentBest.length > 0) all = [...all, ...currentBest]
+      while (all.length > 0 && all[all.length - 1].role === 'assistant') all = all.slice(0, -1)
+      if (!cancelled) { setMessages(all); setEmpty(all.length === 0); setLoading(false) }
+    }
+    build()
+    return () => { cancelled = true }
+  }, [session])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#0C0C09', border: '1px solid #1E1E14', borderRadius: 10,
+          width: '100%', maxWidth: 720, maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
+          borderBottom: '1px solid #1A1A14', flexShrink: 0,
+        }}>
+          <span style={{ ...mono, fontSize: 10, letterSpacing: '0.12em', color: '#4A4A38' }}>TRANSCRIPT</span>
+          <span style={{ ...mono, fontSize: 12, color: '#C8A96E' }}>{session.business_name || '(no name)'}</span>
+          <button
+            onClick={onClose}
+            style={{
+              marginLeft: 'auto', background: 'transparent', border: '1px solid #2A2A1E',
+              borderRadius: 4, padding: '3px 10px', cursor: 'pointer', color: '#4A4A38', ...mono, fontSize: 11,
+            }}
+          >✕ close</button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {loading ? (
+            <div style={{ color: '#3A3A28', ...mono, fontSize: 12, textAlign: 'center', padding: '40px 0' }}>Loading transcript…</div>
+          ) : empty ? (
+            <div style={{ color: '#3A3A28', ...mono, fontSize: 12, textAlign: 'center', padding: '40px 0' }}>
+              No conversation recorded for this session.
+            </div>
+          ) : messages.map((msg, i) => {
+            const isAssistant = msg.role === 'assistant'
+            const isSectionLabel = isAssistant && msg.content.startsWith('—') && msg.content.endsWith('—')
+            if (isSectionLabel) return (
+              <div key={i} style={{ textAlign: 'center', padding: '14px 0 6px', ...mono, fontSize: 10, letterSpacing: '0.12em', color: '#3A3A28' }}>{msg.content}</div>
+            )
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: isAssistant ? 'flex-start' : 'flex-end' }}>
+                <div style={{
+                  maxWidth: '80%',
+                  background: isAssistant ? '#111110' : '#0F0F0A',
+                  border: `1px solid ${isAssistant ? '#1E1E14' : '#161612'}`,
+                  borderRadius: isAssistant ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
+                  padding: '9px 13px', color: isAssistant ? '#C8B070' : '#9A9888',
+                  fontFamily: 'Georgia, serif', fontSize: 13.5, lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>{msg.content}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ClientCard({ session, adminEmail, allSessions }: { session: Session; adminEmail: string; allSessions: Session[] }) {
   const [expanded, setExpanded] = useState(false)
   const [analysis, setAnalysis] = useState<any>(session.admin_analysis || null)
@@ -378,6 +670,7 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
   const [rawResponses, setRawResponses] = useState<RawResponse[] | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
 
   function copyResumeLink(e: React.MouseEvent) {
     e.stopPropagation()
@@ -388,10 +681,14 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
     })
   }
 
-  const summaryCount = (session.completed_summaries || []).length
-  const pct = session.current_q_index ? Math.round((session.current_q_index / 35) * 100) : 0
+  const summaryCount = topicCount(session)
+  const pillar = isPillarSession(session)
+  const totalTopics = pillar ? 7 : 35
+  const pct = pillar
+    ? Math.round((summaryCount / 7) * 100)
+    : session.current_q_index ? Math.round((session.current_q_index / 35) * 100) : 0
   const isAnon = session.user_id == null
-  const hasActivity = (session.current_q_index || 0) > 0
+  const hasActivity = pillar ? summaryCount > 0 : (session.current_q_index || 0) > 0
 
   async function analyse() {
     setAnalysisLoading(true)
@@ -437,10 +734,30 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
         {isAnon && (
           <span style={tag('#7A5A38', '#100C06')}>ANON</span>
         )}
-        <span style={tag(session.status === 'completed' ? '#7AAA7A' : '#8A6A30', session.status === 'completed' ? '#0A120A' : '#120E08')}>
+        <span style={tag(isCompleted(session) ? '#7AAA7A' : '#8A6A30', isCompleted(session) ? '#0A120A' : '#120E08')}>
           {session.status}
         </span>
-        <span style={{ ...mono, fontSize: 10, color: '#3A3A28' }}>{summaryCount} topics</span>
+        <span style={{ ...mono, fontSize: 10, color: '#3A3A28' }}>
+          {pillar ? `${summaryCount}/7 sections` : `${summaryCount} topics`}
+        </span>
+        {session.cost_usd != null && (
+          <span style={{ ...mono, fontSize: 10, color: '#7A6A40' }} title={`${(session.input_tokens ?? 0).toLocaleString()} in / ${(session.output_tokens ?? 0).toLocaleString()} out tokens`}>
+            ${session.cost_usd.toFixed(2)}
+          </span>
+        )}
+        <button
+          onClick={e => { e.stopPropagation(); setShowTranscript(true) }}
+          style={{
+            background: 'transparent', border: '1px solid #2A2A1E',
+            borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            color: '#3A3A28', ...mono, fontSize: 9, letterSpacing: '0.06em',
+            flexShrink: 0, transition: 'color 0.2s, border-color 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#C8A96E'; e.currentTarget.style.borderColor = '#C8A96E40' }}
+          onMouseLeave={e => { e.currentTarget.style.color = '#3A3A28'; e.currentTarget.style.borderColor = '#2A2A1E' }}
+        >
+          transcript
+        </button>
         <button
           onClick={copyResumeLink}
           title="Copy resume link"
@@ -514,8 +831,36 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
             </div>
           )}
 
-          {/* Summaries */}
-          {summaryCount > 0 && (
+          {/* Pillar breakdown (v:2) — per-section confidence + DATA/GUT tag */}
+          {pillar && summaryCount > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <SectionLabel>SECTION QUALITY — DATA vs GUT</SectionLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {TRANSCRIPT_PILLAR_ORDER.filter(n => session.dashboard_cache?.pillars?.[n]).map(name => {
+                  const p = session.dashboard_cache.pillars[name]
+                  const db = p.dataBacked
+                  const tagStyle = db === true ? tag('#7AAA7A', '#0A120A') : db === false ? tag('#C08050', '#120C08') : tag('#5A5A48', '#111110')
+                  return (
+                    <div key={name} style={{ borderLeft: '2px solid #1A1A14', paddingLeft: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                        <span style={{ color: '#9A9080', ...mono, fontSize: 11 }}>{TRANSCRIPT_PILLAR_LABELS[name] || name}</span>
+                        <span style={tagStyle}>{db === true ? 'DATA' : db === false ? 'GUT' : 'UNTAGGED'}</span>
+                        {typeof p.confidence === 'number' && (
+                          <span style={{ ...mono, fontSize: 9, color: '#4A4A38' }}>{p.confidence}% conf</span>
+                        )}
+                      </div>
+                      {p.situation && (
+                        <div style={{ color: '#8A8070', fontSize: 12.5, lineHeight: 1.5, fontFamily: 'Georgia, serif' }}>{p.situation}</div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Summaries (legacy per-question sessions) */}
+          {!pillar && summaryCount > 0 && (
             <div style={{ marginBottom: 16 }}>
               <SectionLabel>INTERVIEW DATA</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -610,6 +955,8 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
           )}
         </div>
       )}
+
+      {showTranscript && <TranscriptModal session={session} onClose={() => setShowTranscript(false)} />}
     </div>
   )
 }
@@ -649,10 +996,10 @@ function ChatView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: s
   }
 
   const suggestions = [
-    'What are the most common problems across all clients?',
-    'Which clients are furthest along in their interview?',
+    'Top 10 clients by revenue band — table with industry, size, and location',
+    'For retail businesses: most common problems with a count and a one-line situation each',
+    'Rank industries by number of clients, with their average area scores',
     'Where are clients most likely flying blind with no data?',
-    'What patterns do you see in how owners talk about pricing?',
   ]
 
   return (
@@ -686,9 +1033,12 @@ function ChatView({ sessions, adminEmail }: { sessions: Session[]; adminEmail: s
               background: msg.role === 'user' ? '#1A1A12' : '#111110',
               border: `1px solid ${msg.role === 'user' ? '#2A2A1E' : '#1A1A14'}`,
               borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-              padding: '12px 16px', color: '#D0C8B8', fontSize: 14,
-              lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              fontFamily: msg.role === 'user' ? 'monospace' : 'Georgia, serif',
+              padding: '12px 16px', color: '#D0C8B8',
+              fontSize: msg.role === 'user' ? 14 : 12.5,
+              lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              // Monospace for assistant so markdown tables / rankings stay aligned
+              fontFamily: 'monospace',
+              overflowX: 'auto',
             }}>
               {msg.content}
             </div>
@@ -974,26 +1324,52 @@ export default function AdminPage() {
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'funnel' | 'patterns' | 'clients' | 'feedback' | 'chat'>('funnel')
   const [search, setSearch] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminRole, setAdminRole] = useState<'full' | 'readonly'>('full')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'full' | 'readonly'>('readonly')
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteStatus, setInviteStatus] = useState<{ ok?: boolean; error?: string } | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       setUser(user ?? null)
+      if (user?.email) {
+        const { data: cache } = await supabase
+          .from('admin_cache')
+          .select('data')
+          .eq('key', 'admin_emails')
+          .single()
+        // Support new {admins:[{email,role}]} format and old {emails:[]} format
+        const admins: { email: string; role: 'full' | 'readonly' }[] =
+          cache?.data?.admins ?? (cache?.data?.emails ?? [ADMIN_EMAIL]).map((e: string) => ({ email: e, role: 'full' }))
+        const entry = admins.find(a => a.email === user.email)
+          ?? (user.email === ADMIN_EMAIL ? { email: user.email, role: 'full' as const } : null)
+        setIsAdmin(!!entry)
+        setAdminRole(entry?.role ?? 'full')
+      }
       setAuthLoading(false)
     })
   }, [])
 
-  useEffect(() => {
-    if (user?.email !== ADMIN_EMAIL) return
+  async function loadSessions() {
     setSessionsLoading(true)
-    supabase
+    const { data } = await supabase
       .from('sessions')
-      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at, user_id')
+      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at, user_id, dashboard_cache, questions_completed, input_tokens, output_tokens, cost_usd, niche, employee_count, size_band, revenue_band, years_in_business, region, country, city, scores')
       .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setSessions(data || [])
-        setSessionsLoading(false)
-      })
-  }, [user])
+    setSessions(data || [])
+    setSessionsLoading(false)
+  }
+
+  useEffect(() => {
+    if (!isAdmin) return
+    loadSessions()
+  }, [isAdmin])
 
   if (authLoading) {
     return (
@@ -1003,10 +1379,86 @@ export default function AdminPage() {
     )
   }
 
-  if (!user || user.email !== ADMIN_EMAIL) {
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setLoginLoading(true)
+    setLoginError('')
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: ADMIN_EMAIL,
+      password: loginPassword,
+    })
+    if (error || data.user?.email !== ADMIN_EMAIL) {
+      setLoginError('Incorrect password.')
+      setLoginLoading(false)
+      return
+    }
+    setUser(data.user)
+    setIsAdmin(true)
+    setAdminRole(data.user.email === ADMIN_EMAIL ? 'full' : 'full') // role confirmed via useEffect on mount
+    setLoginLoading(false)
+  }
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault()
+    setInviteLoading(true)
+    setInviteStatus(null)
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/admin-invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+    })
+    const json = await res.json()
+    if (json.error) {
+      setInviteStatus({ error: json.error })
+    } else {
+      setInviteStatus({ ok: true })
+      setInviteEmail('')
+    }
+    setInviteLoading(false)
+  }
+
+  if (!user || !isAdmin) {
     return (
       <div style={{ minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 12 }}>Access denied.</span>
+        <div style={{ width: 300, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ textAlign: 'center', marginBottom: 4 }}>
+            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.18em', marginBottom: 6 }}>POCKET CMO</div>
+            <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.12em' }}>ADMIN</div>
+          </div>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input
+              type="password"
+              placeholder="Password"
+              value={loginPassword}
+              onChange={e => setLoginPassword(e.target.value)}
+              autoFocus
+              style={{
+                background: '#111110', border: '1px solid #1A1A14', borderRadius: 6,
+                padding: '10px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 13,
+                outline: 'none', width: '100%', boxSizing: 'border-box',
+              }}
+            />
+            {loginError && (
+              <div style={{ color: '#E07B5A', fontFamily: 'monospace', fontSize: 11 }}>{loginError}</div>
+            )}
+            <button
+              type="submit"
+              disabled={loginLoading || !loginPassword}
+              style={{
+                background: '#1A1A14', border: '1px solid #2A2A20', borderRadius: 6,
+                padding: '10px', color: loginLoading ? '#3A3A28' : '#C8A96E',
+                fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.06em',
+                cursor: loginLoading || !loginPassword ? 'default' : 'pointer',
+              }}
+            >
+              {loginLoading ? 'Signing in...' : 'Sign in →'}
+            </button>
+          </form>
+        </div>
       </div>
     )
   }
@@ -1043,12 +1495,104 @@ export default function AdminPage() {
           <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 10 }}>
             {withData.length} sessions with data
           </span>
-          <span style={{
-            color: '#4A6A4A', background: '#101410', border: '1px solid #1A2A1A',
-            borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace', fontSize: 10,
-          }}>
-            {user.email}
-          </span>
+
+          {/* Invite admin — full admins only */}
+          {adminRole === 'full' && <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => { setInviteOpen(o => !o); setInviteStatus(null) }}
+              style={{
+                color: inviteOpen ? '#C8A96E' : '#3A3A28', background: 'transparent', border: 'none',
+                fontFamily: 'monospace', fontSize: 10, cursor: 'pointer', padding: 0, letterSpacing: '0.06em',
+              }}
+            >
+              + invite admin
+            </button>
+            {inviteOpen && (
+              <div style={{
+                position: 'absolute', right: 0, top: 'calc(100% + 10px)', zIndex: 50,
+                background: '#111110', border: '1px solid #1E1E14', borderRadius: 8,
+                padding: '14px 16px', width: 280, boxShadow: '0 8px 24px #00000060',
+              }}>
+                <div style={{ fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em', color: '#3A3A28', marginBottom: 10 }}>
+                  INVITE ADMIN
+                </div>
+                <form onSubmit={handleInvite} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input
+                    type="email"
+                    placeholder="colleague@email.com"
+                    value={inviteEmail}
+                    onChange={e => setInviteEmail(e.target.value)}
+                    autoFocus
+                    style={{
+                      background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 5,
+                      padding: '8px 10px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 12,
+                      outline: 'none', width: '100%', boxSizing: 'border-box',
+                    }}
+                  />
+                  {/* Role toggle */}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['readonly', 'full'] as const).map(r => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setInviteRole(r)}
+                        style={{
+                          flex: 1, background: inviteRole === r ? '#1E1A10' : '#0C0C09',
+                          border: `1px solid ${inviteRole === r ? '#C8A96E50' : '#1A1A14'}`,
+                          borderRadius: 5, padding: '6px 0',
+                          color: inviteRole === r ? '#C8A96E' : '#3A3A28',
+                          fontFamily: 'monospace', fontSize: 10, cursor: 'pointer', letterSpacing: '0.04em',
+                        }}
+                      >
+                        {r === 'readonly' ? 'Read only' : 'Full access'}
+                      </button>
+                    ))}
+                  </div>
+                  {inviteStatus?.error && (
+                    <div style={{ color: '#E07B5A', fontFamily: 'monospace', fontSize: 11 }}>{inviteStatus.error}</div>
+                  )}
+                  {inviteStatus?.ok && (
+                    <div style={{ color: '#7EB8A4', fontFamily: 'monospace', fontSize: 11 }}>Invite sent ✓</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="submit"
+                      disabled={inviteLoading || !inviteEmail}
+                      style={{
+                        flex: 1, background: '#1A1A14', border: '1px solid #2A2A20', borderRadius: 5,
+                        padding: '7px', color: inviteLoading || !inviteEmail ? '#3A3A28' : '#C8A96E',
+                        fontFamily: 'monospace', fontSize: 11, cursor: inviteLoading || !inviteEmail ? 'default' : 'pointer',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      {inviteLoading ? 'Sending...' : 'Send invite →'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInviteOpen(false)}
+                      style={{
+                        background: 'transparent', border: '1px solid #1A1A14', borderRadius: 5,
+                        padding: '7px 10px', color: '#3A3A28', fontFamily: 'monospace', fontSize: 11, cursor: 'pointer',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>}
+
+          <button
+            onClick={async () => { await supabase.auth.signOut(); setUser(null); setIsAdmin(false) }}
+            style={{
+              color: '#2A2A20', background: 'transparent', border: 'none',
+              fontFamily: 'monospace', fontSize: 10, cursor: 'pointer', padding: 0,
+            }}
+            title="Sign out"
+          >
+            {user.email} · sign out
+          </button>
         </div>
       </div>
 
@@ -1084,7 +1628,7 @@ export default function AdminPage() {
             )}
 
             {activeTab === 'patterns' && (
-              <PatternsView sessions={sessions} adminEmail={user.email} />
+              <CategoryBucketsView sessions={sessions} isFullAdmin={adminRole === 'full'} onReloadSessions={loadSessions} sessionsLoading={sessionsLoading} />
             )}
 
             {activeTab === 'clients' && (

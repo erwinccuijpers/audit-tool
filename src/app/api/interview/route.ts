@@ -16,7 +16,8 @@ const TRANSITION_PHRASES = [
 ]
 
 export async function POST(req: NextRequest) {
-  const { question, followUps, conversation, toolNote, previousContext, businessProfile } = await req.json()
+  const { question, followUps, conversation, toolNote, previousContext, businessProfile, language } = await req.json()
+  const lang = language || 'English'
 
   const contextBlock = previousContext && previousContext.length > 0
     ? previousContext.map((p: any, i: number) => `${i + 1}. Topic: ${p.question}\n   What they said: ${p.summary}`).join('\n')
@@ -69,6 +70,8 @@ WHEN TO MOVE ON:
 - The topic is truly not relevant to this business type
 - Do NOT skip just because the surface answer seems fine — always check if there's a tool or data gap underneath
 
+LANGUAGE: The owner has chosen to conduct this interview in ${lang}. Always respond in ${lang}. If they write in a different language, gently mirror theirs but default to ${lang}. The completion signals COMPLETE|DATA and COMPLETE|GUT must always be returned in English exactly as written — never translate them.
+
 CRITICAL RULES:
 - NEVER quote or repeat the question text from your instructions verbatim — rephrase everything in your own conversational words
 - NEVER show the owner what topics are coming next
@@ -76,7 +79,13 @@ CRITICAL RULES:
 - Maximum 3 follow-ups per topic then move on regardless
 - When moving on, respond with ONLY one of these two signals (nothing else):
     COMPLETE|DATA — owner gave concrete, data-backed answers: cited specific numbers, named a tool they actually use, referred to reports or metrics they've actually looked at, gave figures they know for certain
-    COMPLETE|GUT — owner was running on gut feel or estimates: used phrases like "I think", "probably", "I'd say around", "not sure but", gave no specific data sources, or acknowledged it's an assumption`
+    COMPLETE|GUT — owner was running on gut feel or estimates: used phrases like "I think", "probably", "I'd say around", "not sure but", gave no specific data sources, or acknowledged it's an assumption
+
+IF THE OWNER SAYS YOU ALREADY ASKED THIS:
+- If they say something like "you already asked this", "we covered this", "didn't I already tell you this", or "you just asked me that" — acknowledge it warmly, apologise briefly, tell them you've flagged it so the tool can improve, and move on immediately. Example: "You're right, my apologies — that's a duplicate. I've flagged it so we can fix it. Let me move on." Then output COMPLETE|DATA or COMPLETE|GUT based on what they've already said, with nothing else.
+
+IF THE OWNER ASKS FOR IDEAS OR WANTS TO BRAINSTORM:
+- If they ask "what should I do about this?", "can you give me some ideas?", "what do you recommend?", or start wanting to problem-solve or brainstorm — respond warmly but redirect. This tool is built to get the clearest possible picture of their business first; the ideas and recommendations come at the end in the report. Tell them a future feature for live brainstorming and co-working is in development, but right now the most valuable thing is finishing the diagnostic so the suggestions are grounded in the full picture. Keep it encouraging and brief, then return to the current topic. Example: "Love that you're already thinking about solutions — that instinct is spot on. For now I want to keep building the full picture, because the ideas in your report will be much sharper once we have the complete data. We're not yet set up to brainstorm live, but that's coming. Let's finish mapping things out first — [continue with topic]..."`
 
   const messages = conversation.map((msg: { role: string; content: string }) => ({
     role: msg.role as 'user' | 'assistant',
@@ -97,5 +106,5 @@ CRITICAL RULES:
     : null
   const message = isComplete ? '' : raw
 
-  return NextResponse.json({ message, isComplete, dataBacked })
+  return NextResponse.json({ message, isComplete, dataBacked, usage: response.usage })
 }

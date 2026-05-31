@@ -3,6 +3,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import FeedbackButton from '@/components/FeedbackButton'
+import ClientNav from '@/components/ClientNav'
 
 function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: string; category: string; recommendation: string }) {
   const [open, setOpen] = useState(false)
@@ -193,29 +194,49 @@ function DashboardContent() {
     setBusinessName(session.business_name || '')
     setSessionStatus(session.status || '')
 
-    const completedSummaries: { question: string; summary: string; data_backed?: boolean | null }[] = session.completed_summaries || []
-    setCompletedSummaries(completedSummaries)
-    const summaryCount = completedSummaries.length
-
-    // Serve from cache if summaries haven't changed since last generation
-    if (session.dashboard_cache && session.dashboard_cache_count === summaryCount) {
-      // Cache may be old array shape or new object shape
-      const cache = session.dashboard_cache
-      if (Array.isArray(cache)) {
-        setCategories(cache)
-      } else {
-        setCategories(cache.categories || [])
-        setEmergingPicture(cache.emerging_picture || null)
-      }
+    // ── Pillar-mode dashboard (v:2) ──────────────────────────────────────────
+    if (session.dashboard_cache?.v === 2) {
+      const pillars: Record<string, any> = session.dashboard_cache?.pillars || {}
+      const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+      const pillarCategories = PILLAR_ORDER.map(name => {
+        const p = pillars[name]
+        if (!p) return { category: name, confidence: 0, confidence_label: 'No data' as const, situation: 'Not yet covered.', recommendation: 'More data needed: this section has not been covered yet.', data_gaps: [] }
+        const conf = p.confidence ?? 0
+        const confLabel = conf >= 76 ? 'Strong data' : conf >= 51 ? 'Good basis' : conf >= 26 ? 'Early signals' : 'No data'
+        return {
+          category: name.charAt(0).toUpperCase() + name.slice(1),
+          confidence: conf,
+          confidence_label: confLabel as 'No data' | 'Early signals' | 'Good basis' | 'Strong data',
+          situation: p.situation || '',
+          recommendation: p.recommendation || '',
+          data_gaps: p.dataGaps || [],
+          // Extra pillar fields for display
+          entities: p.entities,
+          contextSummary: p.contextSummary,
+          completedAt: p.completedAt,
+        }
+      })
+      const completedCount = Object.keys(pillars).length
+      setCategories(pillarCategories as any)
+      setEmergingPicture(completedCount > 0
+        ? `${completedCount} of 7 sections completed. ${completedCount < 7 ? 'Dashboard updates automatically as each section closes.' : 'All sections complete — see your full report.'}`
+        : null)
+      setCategoryQuestionsMap(new Map())
       setLoading(false)
       return
     }
+    // ────────────────────────────────────────────────────────────────────────
+
+    const completedSummaries: { question: string; summary: string; data_backed?: boolean | null }[] = session.completed_summaries || []
+    setCompletedSummaries(completedSummaries)
+    const summaryCount = completedSummaries.length
 
     setLoadingMessage('Loading question bank...')
 
     const { data: questions, error: qErr } = await supabase
       .from('questions')
       .select('id, category, core_question, applies_to')
+      .in('category', ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people'])
       .order('sort_order')
 
     if (qErr || !questions || questions.length === 0) {
@@ -229,7 +250,7 @@ function DashboardContent() {
     const filtered = questions.filter((q: any) => {
       if (!q.applies_to || q.applies_to.length === 0) return true
       if (q.applies_to.includes('has_employees') && hasEmployees === false) return false
-      if (q.applies_to.includes('has_employees')) return true // true or null = include
+      if (q.applies_to.includes('has_employees')) return true
       if (!businessType) return true
       return q.applies_to.includes(businessType) || q.applies_to.includes('all')
     })
@@ -260,7 +281,49 @@ function DashboardContent() {
       }
     })
 
-    setLoadingMessage('Analysing your data...')
+    // ── Per-category staleness check ─────────────────────────────────────────
+    // Each cached category stores source_questions (the question texts covered at
+    // generation time). If the covered set hasn't changed, we reuse that category
+    // from cache instead of regenerating it.
+    const existingCache = session.dashboard_cache
+    const cachedCategoryMap = new Map<string, any>()
+    let staleCategories: string[] = []
+
+    if (existingCache && !Array.isArray(existingCache) && Array.isArray(existingCache.categories)) {
+      existingCache.categories.forEach((c: any) => cachedCategoryMap.set(c.category, c))
+
+      for (const catData of categoryData) {
+        const cached = cachedCategoryMap.get(catData.name)
+        const currentKey = catData.covered.map((cv: any) => cv.question).sort().join('|')
+        const cachedKey = ((cached?.source_questions as string[]) || []).sort().join('|')
+        if (currentKey !== cachedKey) staleCategories.push(catData.name)
+      }
+
+      if (staleCategories.length === 0) {
+        // Every category is fresh — serve entirely from cache
+        setCategories(existingCache.categories)
+        setEmergingPicture(existingCache.emerging_picture || null)
+        setLoading(false)
+        return
+      }
+    } else {
+      // No usable cache (old format, null, or fresh session)
+      staleCategories = categoryData.map(c => c.name)
+    }
+
+    const staleCount = staleCategories.length
+    const totalCount = categoryData.length
+    setLoadingMessage(
+      staleCount < totalCount
+        ? `Updating ${staleCount} of ${totalCount} areas…`
+        : 'Analysing your data…'
+    )
+
+    // Cached situations for non-stale categories — gives Claude context for
+    // emerging_picture without re-sending their full question data
+    const cachedSituations = [...cachedCategoryMap.values()]
+      .filter((c: any) => !staleCategories.includes(c.category) && c.situation)
+      .map((c: any) => ({ category: c.category, situation: c.situation }))
 
     const res = await fetch('/api/dashboard', {
       method: 'POST',
@@ -273,6 +336,10 @@ function DashboardContent() {
         ownerTone: session.owner_tone,
         categoryData,
         language: session.language || 'English',
+        ...(staleCount < totalCount && {
+          categoriesToRegenerate: staleCategories,
+          cachedSituations,
+        }),
       }),
     })
 
@@ -283,15 +350,26 @@ function DashboardContent() {
     }
 
     const data = await res.json()
-    if (data.usage) console.log('[tokens] dashboard:', data.usage)
-    const freshCategories = data.categories || []
+    if (data.usage) console.log('[tokens] dashboard:', data.usage, `(${staleCount}/${totalCount} categories)`)
+
+    const freshCategories: any[] = (data.categories || []).map((c: any) => ({
+      ...c,
+      // Store covered question texts so next load can detect staleness per-category
+      source_questions: (categoryData.find(cd => cd.name === c.category)?.covered || []).map(cv => cv.question),
+    }))
+
+    // Merge: keep cached non-stale categories, replace stale ones with fresh
+    const cachedUnchanged = [...cachedCategoryMap.values()].filter(
+      (c: any) => !staleCategories.includes(c.category)
+    )
+    const mergedCategories = [...cachedUnchanged, ...freshCategories]
     const freshSummary = data.emerging_picture || null
-    setCategories(freshCategories)
+
+    setCategories(mergedCategories)
     setEmergingPicture(freshSummary)
 
-    // Save to cache as new shape {emerging_picture, categories}
     await supabase.from('sessions').update({
-      dashboard_cache: { emerging_picture: freshSummary, categories: freshCategories },
+      dashboard_cache: { emerging_picture: freshSummary, categories: mergedCategories },
       dashboard_cache_count: summaryCount,
     }).eq('id', sid)
 
@@ -385,71 +463,48 @@ function DashboardContent() {
     <div style={{ minHeight: '100dvh', background: '#0C0C09', fontFamily: 'Georgia, serif' }}>
 
       {/* Header */}
-      <div style={{
-        background: '#0F0F0B', borderBottom: '1px solid #1A1A14',
-        padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 16,
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <button
-          onClick={() => {
-            sessionStorage.setItem('autoResume', 'true')
-            router.push('/')
-          }}
-          style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: '#4A4A38', fontFamily: 'monospace', fontSize: 12,
-            padding: '4px 0', display: 'flex', alignItems: 'center', gap: 6,
-            transition: 'color 0.2s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#C8A96E')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#4A4A38')}
-        >
-          ← Interview
-        </button>
-        {sessionStatus === 'completed' && (
+      <ClientNav
+        sessionId={sessionId}
+        active="dashboard"
+        businessName={businessName}
+        actions={
           <>
-            <div style={{ width: 1, height: 14, background: '#1E1E14' }} />
+            {sessionStatus === 'completed' && (
+              <button
+                onClick={handleReopen}
+                disabled={reopening}
+                style={{
+                  background: 'transparent', border: '1px solid #252520',
+                  borderRadius: 5, padding: '4px 12px', cursor: reopening ? 'default' : 'pointer',
+                  color: reopening ? '#3A3A28' : '#7A7A58', fontFamily: 'monospace', fontSize: 11,
+                  letterSpacing: '0.05em', transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => { if (!reopening) { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.35)'; e.currentTarget.style.color = '#C8A96E' } }}
+                onMouseLeave={e => { if (!reopening) { e.currentTarget.style.borderColor = '#252520'; e.currentTarget.style.color = '#7A7A58' } }}
+              >
+                {reopening ? 'Opening...' : '+ Continue interview'}
+              </button>
+            )}
             <button
-              onClick={handleReopen}
-              disabled={reopening}
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Recompute dashboard from latest data"
               style={{
-                background: 'transparent', border: '1px solid #252520',
-                borderRadius: 5, padding: '4px 12px', cursor: reopening ? 'default' : 'pointer',
-                color: reopening ? '#3A3A28' : '#7A7A58', fontFamily: 'monospace', fontSize: 11,
-                letterSpacing: '0.05em', transition: 'all 0.2s',
+                background: 'transparent', border: 'none', cursor: refreshing ? 'default' : 'pointer',
+                color: refreshing ? '#2A2A1E' : '#3A3A28', fontFamily: 'monospace', fontSize: 11,
+                padding: 0, transition: 'color 0.2s',
               }}
-              onMouseEnter={e => { if (!reopening) { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.35)'; e.currentTarget.style.color = '#C8A96E' } }}
-              onMouseLeave={e => { if (!reopening) { e.currentTarget.style.borderColor = '#252520'; e.currentTarget.style.color = '#7A7A58' } }}
+              onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#C8A96E' }}
+              onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#3A3A28' }}
             >
-              {reopening ? 'Opening...' : '+ Continue interview'}
+              {refreshing ? '↻ refreshing...' : '↻ refresh'}
             </button>
+            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>
+              {coveredCount} of {categories.length} areas covered
+            </div>
           </>
-        )}
-        <div style={{ width: 1, height: 14, background: '#1E1E14' }} />
-        <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.12em' }}>OVERVIEW</span>
-        {businessName && (
-          <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 12 }}>{businessName}</span>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            title="Recompute dashboard from latest data"
-            style={{
-              background: 'transparent', border: 'none', cursor: refreshing ? 'default' : 'pointer',
-              color: refreshing ? '#2A2A1E' : '#3A3A28', fontFamily: 'monospace', fontSize: 11,
-              padding: 0, transition: 'color 0.2s',
-            }}
-            onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#C8A96E' }}
-            onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#3A3A28' }}
-          >
-            {refreshing ? '↻ refreshing...' : '↻ refresh'}
-          </button>
-          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>
-            {coveredCount} of {categories.length} areas covered
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Grid */}
       <div style={{ padding: '24px 20px', maxWidth: 1100, margin: '0 auto' }}>
@@ -474,7 +529,7 @@ function DashboardContent() {
               fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em',
               color: '#5A5040', marginBottom: 8,
             }}>
-              EARLY PICTURE — INCOMPLETE
+              {coveredCount >= categories.length && categories.length > 0 ? 'YOUR PICTURE — COMPLETE' : 'EARLY PICTURE — INCOMPLETE'}
             </div>
             <p style={{ color: '#B8A880', fontSize: 14, lineHeight: 1.7, margin: 0, fontFamily: 'Georgia, serif' }}>
               {emergingPicture}

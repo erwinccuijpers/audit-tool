@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/pillar-summary/route.ts": { "maxDuration": 60 },
+    "src/app/api/pillar-interview/route.ts": { "maxDuration": 60 },
+    "src/app/api/report/route.ts": { "maxDuration": 60 }
+  }
+}

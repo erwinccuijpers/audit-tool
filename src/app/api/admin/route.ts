@@ -16,15 +16,74 @@ type Session = {
   current_q_index: number
   completed_summaries: { question: string; summary: string }[]
   created_at: string
+  dashboard_cache?: any
+  questions_completed?: number
+  niche?: string | null
+  employee_count?: number | null
+  size_band?: string | null
+  revenue_band?: string | null
+  years_in_business?: number | null
+  region?: string | null
+  country?: string | null
+  city?: string | null
+  cost_usd?: number | null
+  scores?: Record<string, number> | null
+}
+
+const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+
+function isPillarSession(s: Session) {
+  return s.dashboard_cache?.v === 2
+}
+
+function hasData(s: Session) {
+  if (isPillarSession(s)) return Object.keys(s.dashboard_cache?.pillars || {}).length > 0
+  return (s.completed_summaries || []).length > 0
+}
+
+// Compact firmographic + scores header used for benchmark/ranking queries.
+function firmoHeader(s: Session) {
+  const bits = [
+    s.business_type ? `type=${s.business_type}` : '',
+    s.industry ? `industry=${s.industry}` : '',
+    s.niche ? `niche=${s.niche}` : '',
+    s.size_band ? `size=${s.size_band}` : '',
+    typeof s.employee_count === 'number' ? `employees=${s.employee_count}` : '',
+    s.revenue_band ? `revenue=${s.revenue_band}` : '',
+    typeof s.years_in_business === 'number' ? `years=${s.years_in_business}` : '',
+    [s.city, s.region, s.country].filter(Boolean).join('/') ? `location=${[s.city, s.region, s.country].filter(Boolean).join('/')}` : '',
+    typeof s.cost_usd === 'number' ? `cost=$${s.cost_usd}` : '',
+  ].filter(Boolean).join(', ')
+  const scoreStr = s.scores && Object.keys(s.scores).length
+    ? ` | scores: ${Object.entries(s.scores).map(([k, v]) => `${k}=${v}`).join(', ')}`
+    : ''
+  return bits || scoreStr ? `  [${bits}${scoreStr}]` : ''
 }
 
 function formatSessionsForClaude(sessions: Session[]) {
   return sessions
-    .filter(s => (s.completed_summaries || []).length > 0)
-    .map(s =>
-      `=== ${s.business_name} (${s.business_type || '?'}, ${s.industry || '?'}) — ${s.completed_summaries.length} topics covered ===\n` +
-      s.completed_summaries.map(cs => `• ${cs.question}\n  → ${cs.summary}`).join('\n')
-    )
+    .filter(hasData)
+    .map(s => {
+      if (isPillarSession(s)) {
+        const pillars = s.dashboard_cache?.pillars || {}
+        const pillarLines = PILLAR_ORDER
+          .filter(p => pillars[p])
+          .map(p => {
+            const pd = pillars[p]
+            const entities = pd.entities || {}
+            const entityStr = [
+              entities.tools?.length ? `Tools: ${entities.tools.join(', ')}` : '',
+              entities.numbers?.length ? `Numbers: ${entities.numbers.join(', ')}` : '',
+              entities.flags?.length ? `Flags: ${entities.flags.join(' · ')}` : '',
+            ].filter(Boolean).join(' | ')
+            return `• ${p.toUpperCase()}: ${pd.situation || pd.contextSummary || ''}${entityStr ? ` (${entityStr})` : ''}`
+          })
+          .join('\n')
+        return `=== ${s.business_name} (${s.business_type || '?'}, ${s.industry || '?'}) — ${Object.keys(pillars).length}/7 sections [pillar format] ===\n${firmoHeader(s)}\n${pillarLines}`
+      }
+      return `=== ${s.business_name} (${s.business_type || '?'}, ${s.industry || '?'}) — ${s.completed_summaries.length} topics covered ===\n${firmoHeader(s)}\n` +
+        s.completed_summaries.map(cs => `• ${cs.question}\n  → ${cs.summary}`).join('\n')
+    })
     .join('\n\n')
 }
 
@@ -38,7 +97,7 @@ export async function POST(req: NextRequest) {
 
   // ── PATTERNS: aggregate analysis across all clients ──────────────────────
   if (action === 'patterns') {
-    const relevant = (sessions as Session[]).filter(s => (s.completed_summaries || []).length > 0)
+    const relevant = (sessions as Session[]).filter(hasData)
     if (relevant.length === 0) {
       return NextResponse.json({ error: 'No interview data yet.' }, { status: 400 })
     }
@@ -84,13 +143,26 @@ Return ONLY valid JSON. No markdown, no preamble.`
   // ── CLIENT: individual client deep-dive ──────────────────────────────────
   if (action === 'client') {
     const session = (sessions as Session[]).find(s => s.id === sessionId)
-    if (!session || !session.completed_summaries?.length) {
+    if (!session || !hasData(session)) {
       return NextResponse.json({ error: 'No data for this client.' }, { status: 400 })
     }
 
-    const summaryBlock = session.completed_summaries
-      .map(cs => `Q: ${cs.question}\n→ ${cs.summary}`)
-      .join('\n\n')
+    let summaryBlock: string
+    if (isPillarSession(session)) {
+      const pillars = session.dashboard_cache?.pillars || {}
+      summaryBlock = PILLAR_ORDER
+        .filter(p => pillars[p])
+        .map(p => {
+          const pd = pillars[p]
+          const entities = pd.entities || {}
+          return `PILLAR: ${p.toUpperCase()}\nSituation: ${pd.situation || ''}\nRecommendation: ${pd.recommendation || ''}\nTools: ${entities.tools?.join(', ') || 'none'}\nNumbers: ${entities.numbers?.join(', ') || 'none'}\nFlags: ${entities.flags?.join(' · ') || 'none'}`
+        })
+        .join('\n\n')
+    } else {
+      summaryBlock = session.completed_summaries
+        .map(cs => `Q: ${cs.question}\n→ ${cs.summary}`)
+        .join('\n\n')
+    }
 
     const prompt = `You are doing a deep psychological and strategic analysis of a single business owner based on their diagnostic interview.
 
@@ -139,7 +211,16 @@ Return ONLY valid JSON. No markdown.`
 
     const systemPrompt = `You are Erwin's personal business intelligence assistant for Pocket CMO. You have access to data from all his clients. Answer his questions analytically, citing specific businesses by name when relevant. Be direct, specific, and honest — this is internal analysis, not client-facing. If you spot patterns or connections Erwin hasn't asked about, flag them.
 
-CLIENT DATABASE (${(sessions as Session[]).length} total sessions, ${(sessions as Session[]).filter(s => (s.completed_summaries || []).length > 0).length} with interview data):
+Each business has a firmographic header line in [brackets] with structured fields you can filter, rank, and aggregate on: type, industry, niche, size (solo/micro/small/medium/large), employees, revenue (under_100k…5m_plus), years, location (city/region/country), cost, and per-area scores (1=critical … 5=strong).
+
+WHEN ASKED FOR RANKINGS, TOP-N LISTS, COUNTS, OR BENCHMARKS:
+- Respond with a clean GitHub-flavoured Markdown TABLE, not prose.
+- Honour filters precisely ("industry X", "revenue band Y", "businesses with employees").
+- For "most common problems": aggregate the flags/situations across the matching businesses, give a count column, and a short one-line description per problem (and, when asked, a one-line situation per client).
+- Sort by whatever the question implies (revenue, score, count). If a field is missing for a business, note it as "—" rather than guessing.
+- Keep tables tight; add a one-line takeaway under the table only if it adds insight.
+
+CLIENT DATABASE (${(sessions as Session[]).length} total sessions, ${(sessions as Session[]).filter(hasData).length} with interview data):
 ${dataBlock || 'No interview data collected yet.'}`
 
     const messages = [
