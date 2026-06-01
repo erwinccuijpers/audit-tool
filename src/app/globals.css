@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Layout safety: padding never expands element width; no accidental horizontal scroll. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: hidden; }
+
+/* iOS Safari zooms in when focusing an input whose font-size is < 16px, which then
+   pushes fields off-screen. Force 16px on form controls on small screens to stop it. */
+@media (max-width: 640px) {
+  input, textarea, select { font-size: 16px !important; }
+}
