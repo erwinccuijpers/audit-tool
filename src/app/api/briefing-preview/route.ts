@@ -93,9 +93,9 @@ export async function POST(req: NextRequest) {
   const ideaIds = [...new Set(tags.map(t => t.idea_id))]
   const { data: ideas } = await supabase
     .from('idea_items')
-    .select('id, external_ref, pattern_name, story, raw_idea, core_insight, hidden_asset, example_applications, bottleneck, provenance, confidence')
+    .select('id, external_ref, pattern_name, story, raw_idea, core_insight, hidden_asset, example_applications, bottleneck, provenance, confidence, status')
     .in('id', ideaIds)
-    .eq('status', 'active')
+    .in('status', ['approved', 'active'])
 
   const weightOf = (id: string) => tags.find(t => t.idea_id === id)?.weight ?? 1
   const ranked = (ideas || [])
