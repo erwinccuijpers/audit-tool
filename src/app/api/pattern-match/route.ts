@@ -60,12 +60,23 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   const targetSessionId: string | undefined = body.sessionId
+  // Real vs Demo are kept in fully separate pattern caches so they never mix.
+  // For a targeted (background) call, derive the mode from that session itself so
+  // it always files into the right bucket regardless of any admin toggle.
+  let mode: 'real' | 'demo'
+  if (targetSessionId) {
+    const { data: tgt } = await serviceClient.from('sessions').select('is_test').eq('id', targetSessionId).single()
+    mode = tgt?.is_test ? 'demo' : 'real'
+  } else {
+    mode = body.mode === 'demo' ? 'demo' : 'real'
+  }
+  const cacheKey = `pattern_slots_${mode}`
 
-  // Load existing pattern slots
+  // Load existing pattern slots for this mode
   const { data: cacheRow } = await serviceClient
     .from('admin_cache')
     .select('data')
-    .eq('key', 'pattern_slots')
+    .eq('key', cacheKey)
     .single()
 
   // Migrate from old formats if needed
@@ -95,7 +106,10 @@ export async function POST(req: NextRequest) {
     .from('sessions')
     .select('id, business_name, business_type, industry, completed_summaries, scores, status, dashboard_cache, questions_completed')
 
+  // Targeted call → that one session (mode already derived from it above).
+  // Bulk call → only this mode's sessions: demo = is_test true, real = is_test false.
   if (targetSessionId) query = query.eq('id', targetSessionId)
+  else query = query.eq('is_test', mode === 'demo')
 
   const { data: allSessions } = await query
 
@@ -278,7 +292,7 @@ Rules:
   await serviceClient
     .from('admin_cache')
     .upsert(
-      { key: 'pattern_slots', data: updatedCache, sessions_count: toProcess.length, updated_at: now },
+      { key: cacheKey, data: updatedCache, sessions_count: toProcess.length, updated_at: now },
       { onConflict: 'key' }
     )
 

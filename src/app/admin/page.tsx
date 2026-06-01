@@ -165,12 +165,14 @@ function IssueCard({ issue, isOutlier, onMove }: {
   )
 }
 
-function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessionsLoading }: { sessions: Session[]; isFullAdmin: boolean; onReloadSessions: () => Promise<void>; sessionsLoading: boolean }) {
+function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessionsLoading, dataMode }: { sessions: Session[]; isFullAdmin: boolean; onReloadSessions: () => Promise<void>; sessionsLoading: boolean; dataMode: 'real' | 'demo' }) {
   const [cache, setCache] = useState<BucketCache | null>(null)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [processMsg, setProcessMsg] = useState('')
   const [openBuckets, setOpenBuckets] = useState<Set<string>>(new Set(['retention', 'acquisition']))
+  // Real and Demo patterns live in separate caches so they never mix.
+  const cacheKey = `pattern_slots_${dataMode}`
 
   const processedSessions = cache?.processed_sessions ?? {}
   const unprocessedCount = sessions.filter(s => {
@@ -180,17 +182,20 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
     return !prev || currentCount > prev.summary_count
   }).length
 
+  // Reload the cache whenever the Real/Demo mode changes — they're separate stores.
   useEffect(() => {
+    setLoading(true)
+    setCache(null)
     supabase
       .from('admin_cache')
       .select('data')
-      .eq('key', 'pattern_slots')
+      .eq('key', cacheKey)
       .single()
       .then(({ data }) => {
-        if (data?.data?.buckets) setCache(data.data)
+        setCache(data?.data?.buckets ? data.data : null)
         setLoading(false)
       })
-  }, [])
+  }, [cacheKey])
 
   async function processNew() {
     setProcessing(true)
@@ -198,12 +203,12 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
     const res = await fetch('/api/pattern-match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ mode: dataMode }),
     })
     const data = await res.json()
     if (data.error) { setProcessMsg(`Error: ${data.error}`); setProcessing(false); return }
-    setProcessMsg(`Processed ${data.processed} session${data.processed !== 1 ? 's' : ''} — ${data.totalIssues} issues total`)
-    const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', 'pattern_slots').single()
+    setProcessMsg(`Processed ${data.processed} ${dataMode} session${data.processed !== 1 ? 's' : ''} — ${data.totalIssues} issues total`)
+    const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', cacheKey).single()
     if (refreshed?.data?.buckets) setCache(refreshed.data)
     setProcessing(false)
   }
@@ -228,7 +233,7 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
 
     // Persist
     await supabase.from('admin_cache').upsert(
-      { key: 'pattern_slots', data: updated, updated_at: new Date().toISOString() },
+      { key: cacheKey, data: updated, updated_at: new Date().toISOString() },
       { onConflict: 'key' }
     )
     setOpenBuckets(prev => new Set([...prev, toBucket]))
@@ -259,7 +264,7 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
           onClick={async () => {
             setProcessMsg('')
             await onReloadSessions()
-            const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', 'pattern_slots').single()
+            const { data: refreshed } = await supabase.from('admin_cache').select('data').eq('key', cacheKey).single()
             if (refreshed?.data?.buckets) setCache(refreshed.data)
           }}
           disabled={sessionsLoading || processing}
@@ -1680,7 +1685,7 @@ export default function AdminPage() {
             )}
 
             {activeTab === 'patterns' && (
-              <CategoryBucketsView sessions={sessions} isFullAdmin={adminRole === 'full'} onReloadSessions={loadSessions} sessionsLoading={sessionsLoading} />
+              <CategoryBucketsView sessions={sessions} isFullAdmin={adminRole === 'full'} onReloadSessions={loadSessions} sessionsLoading={sessionsLoading} dataMode={dataMode} />
             )}
 
             {activeTab === 'clients' && (
