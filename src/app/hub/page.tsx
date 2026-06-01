@@ -6,6 +6,7 @@ import { ensureReport } from '@/lib/report'
 import ClientNav from '@/components/ClientNav'
 
 const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Focused full-screen overlay — clearer than an inline reveal, especially on mobile.
 function FullScreenPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -66,6 +67,8 @@ function HubContent() {
   const [showSuggestion, setShowSuggestion] = useState(false)
   const [suggestionText, setSuggestionText] = useState('')
   const [suggestionSent, setSuggestionSent] = useState(false)
+  const [editingEmail, setEditingEmail] = useState<string | null>(null) // productKey being edited
+  const [emailDraft, setEmailDraft] = useState('')
 
   useEffect(() => {
     if (!sessionId) { setError('No session ID.'); setLoading(false); return }
@@ -127,8 +130,9 @@ function HubContent() {
   }
 
   async function toggleInterest(productKey: string, status: 'interested' | 'not_interested') {
-    const email = userEmail || interestEmail.trim() || null
-    if (status === 'interested' && !email) return // UI requires an email first
+    const email = interestEmail.trim() || userEmail || null
+    // Interested requires a valid email; "Not interested" can be recorded without one.
+    if (status === 'interested' && (!email || !EMAIL_RE.test(email))) return
     setSavingInterest(productKey)
     try {
       const r = await fetch('/api/product-interest', {
@@ -140,9 +144,21 @@ function HubContent() {
     setSavingInterest(null)
   }
 
+  async function saveEmail() {
+    const e = emailDraft.trim()
+    if (!EMAIL_RE.test(e)) return
+    try {
+      const r = await fetch('/api/update-lead-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, email: e }),
+      })
+      if (r.ok) { setInterestEmail(e); setEditingEmail(null) }
+    } catch { /* ignore */ }
+  }
+
   async function submitSuggestion() {
-    const email = userEmail || interestEmail.trim() || null
-    if (!suggestionText.trim() || !email) return
+    const email = interestEmail.trim() || userEmail || null
+    if (!suggestionText.trim() || !email || !EMAIL_RE.test(email)) return
     setSavingInterest('open_suggestions')
     try {
       const r = await fetch('/api/product-interest', {
@@ -222,30 +238,56 @@ function HubContent() {
   function InterestControl({ productKey, accent }: { productKey: string; accent: string }) {
     const status = interests[productKey]
     const saving = savingInterest === productKey
-    const knownEmail = userEmail || interestEmail.trim()
-    // No email captured yet (anonymous, first interaction) → ask for it once.
+    const knownEmail = interestEmail.trim() || userEmail || ''
+    const inputValid = EMAIL_RE.test(interestEmail.trim())
+
+    // No email captured yet (anonymous, first interaction) → ask for it once, validated.
     if (!knownEmail && !status) {
       return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 4 }}>
-          <input
-            placeholder="your@email.com" type="email" value={interestEmail}
-            onChange={e => setInterestEmail(e.target.value)}
-            style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '8px 12px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 13, minWidth: 200, flex: 1 }}
-          />
-          <button
-            onClick={() => toggleInterest(productKey, 'interested')}
-            disabled={saving || !interestEmail.trim()}
-            style={{ background: 'transparent', border: `1px solid ${accent}`, borderRadius: 6, padding: '8px 14px', color: accent, fontFamily: 'monospace', fontSize: 12, cursor: saving || !interestEmail.trim() ? 'default' : 'pointer', opacity: saving || !interestEmail.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}
-          >{saving ? 'Saving…' : "I'm interested →"}</button>
+        <div style={{ marginTop: 4 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <input
+              placeholder="your@email.com" type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" value={interestEmail}
+              onChange={e => setInterestEmail(e.target.value)}
+              style={{ background: '#0C0C09', border: `1px solid ${interestEmail && !inputValid ? '#7A4A30' : '#2A2A1E'}`, borderRadius: 6, padding: '8px 12px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 13, minWidth: 200, flex: 1 }}
+            />
+            <button
+              onClick={() => toggleInterest(productKey, 'interested')}
+              disabled={saving || !inputValid}
+              style={{ background: 'transparent', border: `1px solid ${accent}`, borderRadius: 6, padding: '8px 14px', color: accent, fontFamily: 'monospace', fontSize: 12, cursor: saving || !inputValid ? 'default' : 'pointer', opacity: saving || !inputValid ? 0.5 : 1, whiteSpace: 'nowrap' }}
+            >{saving ? 'Saving…' : "I'm interested →"}</button>
+          </div>
+          {interestEmail && !inputValid && <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#9A6A4A', marginTop: 6 }}>Enter a valid email address.</div>}
         </div>
       )
     }
-    // Email known → prefill + lean two-state toggle.
+
+    // Email known → prefill + lean two-state toggle, with an inline "change" editor.
+    const draftValid = EMAIL_RE.test(emailDraft.trim())
     return (
       <div style={{ marginTop: 4 }}>
-        <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>
-          {status === 'interested' ? '✓ ' : ''}We’ll send to <span style={{ color: '#908870' }}>{knownEmail}</span>
-        </div>
+        {editingEmail === productKey ? (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <input
+                type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" value={emailDraft}
+                onChange={e => setEmailDraft(e.target.value)} placeholder="your@email.com"
+                style={{ background: '#0C0C09', border: `1px solid ${emailDraft && !draftValid ? '#7A4A30' : '#2A2A1E'}`, borderRadius: 6, padding: '7px 11px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 12, minWidth: 200, flex: 1 }}
+              />
+              <button onClick={saveEmail} disabled={!draftValid}
+                style={{ background: 'transparent', border: `1px solid ${accent}`, borderRadius: 6, padding: '7px 12px', color: accent, fontFamily: 'monospace', fontSize: 12, cursor: draftValid ? 'pointer' : 'default', opacity: draftValid ? 1 : 0.5 }}>Save</button>
+              <button onClick={() => setEditingEmail(null)}
+                style={{ background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6, padding: '7px 10px', color: '#6A6450', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+            </div>
+            {emailDraft && !draftValid && <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#9A6A4A', marginTop: 6 }}>Enter a valid email address.</div>}
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>
+            {status === 'interested' ? '✓ ' : ''}We’ll send to <span style={{ color: '#908870' }}>{knownEmail}</span>
+            <button onClick={() => { setEmailDraft(knownEmail); setEditingEmail(productKey) }}
+              style={{ background: 'none', border: 'none', color: accent, fontFamily: 'monospace', fontSize: 11, cursor: 'pointer', marginLeft: 8, padding: 0, textDecoration: 'underline' }}>change</button>
+          </div>
+        )}
         <div style={{ display: 'inline-flex', border: '1px solid #2A2A1E', borderRadius: 6, overflow: 'hidden' }}>
           {(['interested', 'not_interested'] as const).map(s => (
             <button
@@ -478,11 +520,16 @@ function HubContent() {
             />
           )}
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button
-              onClick={submitSuggestion}
-              disabled={savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())}
-              style={{ background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '10px 20px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer', opacity: (savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())) ? 0.5 : 1 }}
-            >{savingInterest === 'open_suggestions' ? 'Sending…' : 'Send suggestion →'}</button>
+            {(() => {
+              const ready = !!suggestionText.trim() && EMAIL_RE.test(interestEmail.trim() || userEmail || '') && savingInterest !== 'open_suggestions'
+              return (
+                <button
+                  onClick={submitSuggestion}
+                  disabled={!ready}
+                  style={{ background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '10px 20px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 13, cursor: ready ? 'pointer' : 'default', opacity: ready ? 1 : 0.5 }}
+                >{savingInterest === 'open_suggestions' ? 'Sending…' : 'Send suggestion →'}</button>
+              )
+            })()}
             <button onClick={() => setShowSuggestion(false)} style={{ background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6, padding: '10px 18px', color: '#6A6450', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
         </FullScreenPanel>

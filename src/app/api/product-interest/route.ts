@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const PRODUCTS = ['newsletter', 'work_your_plan', 'open_suggestions'] as const
 const STATUSES = ['interested', 'not_interested'] as const
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // One generic endpoint for any product-interest toggle on the client dashboard.
 // Tables are service-role only (RLS), so all writes go through here.
@@ -16,6 +17,10 @@ export async function POST(req: NextRequest) {
   if (!sessionId) return NextResponse.json({ error: 'No session ID' }, { status: 400 })
   if (!PRODUCTS.includes(productKey)) return NextResponse.json({ error: 'Bad product' }, { status: 400 })
   if (!STATUSES.includes(status)) return NextResponse.json({ error: 'Bad status' }, { status: 400 })
+  // Reject malformed emails so we never capture junk like "g".
+  if (email && !EMAIL_RE.test(String(email).trim())) {
+    return NextResponse.json({ error: 'Invalid email' }, { status: 400 })
+  }
 
   // Stamp email/user/is_test from the session so leads are clean and test runs excluded.
   const { data: session } = await supabase
