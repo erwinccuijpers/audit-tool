@@ -47,6 +47,9 @@ function HubContent() {
   const [interests, setInterests] = useState<Record<string, string>>({})
   const [interestEmail, setInterestEmail] = useState('')
   const [savingInterest, setSavingInterest] = useState<string | null>(null)
+  const [showEmail0, setShowEmail0] = useState(false)
+  const [suggestionText, setSuggestionText] = useState('')
+  const [suggestionSent, setSuggestionSent] = useState(false)
 
   useEffect(() => {
     if (!sessionId) { setError('No session ID.'); setLoading(false); return }
@@ -117,6 +120,20 @@ function HubContent() {
         body: JSON.stringify({ sessionId, productKey, status, email }),
       })
       if (r.ok) setInterests(prev => ({ ...prev, [productKey]: status }))
+    } catch { /* ignore */ }
+    setSavingInterest(null)
+  }
+
+  async function submitSuggestion() {
+    const email = userEmail || interestEmail.trim() || null
+    if (!suggestionText.trim() || !email) return
+    setSavingInterest('open_suggestions')
+    try {
+      const r = await fetch('/api/product-interest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, productKey: 'open_suggestions', status: 'interested', email, note: suggestionText.trim() }),
+      })
+      if (r.ok) { setSuggestionSent(true); setInterests(prev => ({ ...prev, open_suggestions: 'interested' })) }
     } catch { /* ignore */ }
     setSavingInterest(null)
   }
@@ -344,51 +361,102 @@ function HubContent() {
           ))}
         </div>
 
-        {/* ── email0 — weekly briefing preview (lead magnet) ──────────────────── */}
-        <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>YOUR WEEKLY BRIEFING</span>
-            <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>PREVIEW · EMAIL #1</span>
-            {email0?.area && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#7EB8A4', border: '1px solid #234', borderRadius: 3, padding: '1px 6px' }}>{email0.area}</span>}
-          </div>
-          <div style={{ fontSize: 18, color: '#D0C8B8', marginBottom: 4 }}>A taste of what lands in your inbox</div>
+        {/* ── What's next — products in development (each captures interest) ───── */}
+        <div style={{ marginTop: 30, marginBottom: 14 }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.18em', color: '#4A4A38', fontFamily: 'monospace', marginBottom: 6 }}>COMING SOON — HELP US SHAPE IT</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#706850', fontFamily: 'monospace', margin: 0, maxWidth: 600 }}>
+            What we’re building next. Tell us what you’d actually use — it directs what we ship.
+          </p>
+        </div>
 
-          {email0Loading && !email0 && (
-            <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440' }}>Writing your first briefing…</p>
-          )}
-          {email0 && (
-            <div style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 8, padding: '18px 20px', margin: '10px 0 14px' }}>
-              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>Subject</div>
-              <div style={{ fontSize: 16, color: '#E8E0D0', marginBottom: 14 }}>{email0.subject}</div>
-              <div style={{ fontSize: 14, lineHeight: 1.7, color: '#C0B8A8', whiteSpace: 'pre-wrap' }}>{email0.body}</div>
-              {email0.source_ref && <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#3A3A28', marginTop: 14 }}>ref {email0.source_ref}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14, alignItems: 'start' }}>
+          {/* Personalized briefing (newsletter) */}
+          <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>PERSONALIZED BRIEFING</span>
+              <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
             </div>
-          )}
-          {!email0 && !email0Loading && (
-            <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440', margin: '8px 0 14px' }}>
-              Your personalized briefing will appear here shortly after your diagnostic is processed.
+            <div style={{ fontSize: 17, color: '#D0C8B8' }}>Customized emails, matched to you</div>
+            <p style={{ fontSize: 12.5, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: 0, flex: 1 }}>
+              Every email a new, usable lesson — drawn from real cases that fit your business. Not a generic newsletter.
             </p>
-          )}
-
-          {/* Pitch copy is a placeholder — to be refined later. */}
-          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: '0 0 4px', maxWidth: 560 }}>
-            Want a fresh one of these every week — matched to your business? Free during the test, no card.
-          </p>
-          <InterestControl productKey="newsletter" accent="#C8A96E" />
-        </div>
-
-        {/* ── Work your plan (interest capture) ───────────────────────────────── */}
-        <div style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#9A8A6A', fontFamily: 'monospace' }}>WORK YOUR PLAN</span>
-            <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
+            <button
+              onClick={() => setShowEmail0(v => !v)}
+              style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #C8A96E66', borderRadius: 6, padding: '7px 14px', color: '#C8A96E', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', letterSpacing: '0.04em' }}
+            >{showEmail0 ? 'Hide example' : 'Let me read it first →'}</button>
+            <InterestControl productKey="newsletter" accent="#C8A96E" />
           </div>
-          <div style={{ fontSize: 18, color: '#D0C8B8', marginBottom: 4 }}>Turn the analysis into action</div>
-          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: '0 0 4px', maxWidth: 560 }}>
-            Tool walkthroughs, vetted experts to implement for you, and sources to dig deeper. Want this when it’s ready?
-          </p>
-          <InterestControl productKey="work_your_plan" accent="#9A8A6A" />
+
+          {/* Work your plan */}
+          <div style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#9A8A6A', fontFamily: 'monospace' }}>WORK YOUR PLAN</span>
+              <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
+            </div>
+            <div style={{ fontSize: 17, color: '#D0C8B8' }}>Put the plan to work</div>
+            <p style={{ fontSize: 12.5, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: 0, flex: 1 }}>
+              Start working with your data: actionable implementation plans, and update your profile on the go as your business grows.
+            </p>
+            <InterestControl productKey="work_your_plan" accent="#9A8A6A" />
+          </div>
+
+          {/* Open suggestions */}
+          <div style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#7EB8A4', fontFamily: 'monospace' }}>OPEN SUGGESTIONS</span>
+            <div style={{ fontSize: 17, color: '#D0C8B8' }}>Tell us what you need</div>
+            <p style={{ fontSize: 12.5, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: 0 }}>
+              Have an idea, want to work with us, or need a custom feature? Send it — we’ll notify you when we roll it out.
+            </p>
+            {suggestionSent ? (
+              <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#6AA36A', marginTop: 2 }}>✓ Thanks — we’ll be in touch.</div>
+            ) : (
+              <>
+                <textarea
+                  value={suggestionText}
+                  onChange={e => setSuggestionText(e.target.value)}
+                  placeholder="e.g. I'd like to work with you · I want to white-label this for my consulting business · I need this specific feature…"
+                  rows={3}
+                  style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '9px 11px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 12, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
+                />
+                {!userEmail && (
+                  <input
+                    placeholder="your@email.com" type="email" value={interestEmail}
+                    onChange={e => setInterestEmail(e.target.value)}
+                    style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '8px 11px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box' }}
+                  />
+                )}
+                <button
+                  onClick={submitSuggestion}
+                  disabled={savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())}
+                  style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '7px 14px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', opacity: (savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())) ? 0.5 : 1 }}
+                >{savingInterest === 'open_suggestions' ? 'Sending…' : 'Send suggestion →'}</button>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Revealed email0 example (full width) + footer explainer */}
+        {showEmail0 && (
+          <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>EXAMPLE — YOUR FIRST EMAIL</span>
+              {email0?.area && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#7EB8A4', border: '1px solid #234', borderRadius: 3, padding: '1px 6px' }}>{email0.area}</span>}
+            </div>
+            {email0Loading && !email0 && <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440' }}>Writing your example…</p>}
+            {email0 && (
+              <div style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 8, padding: '18px 20px', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>Subject</div>
+                <div style={{ fontSize: 16, color: '#E8E0D0', marginBottom: 14 }}>{email0.subject}</div>
+                <div style={{ fontSize: 14, lineHeight: 1.7, color: '#C0B8A8', whiteSpace: 'pre-wrap' }}>{email0.body}</div>
+              </div>
+            )}
+            {!email0 && !email0Loading && <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440', marginBottom: 14 }}>Your example will appear once your diagnostic is processed.</p>}
+            {/* Footer explainer — what's going on */}
+            <div style={{ borderTop: '1px solid #1A1A14', paddingTop: 14, fontSize: 12, lineHeight: 1.75, color: '#6A6450', fontFamily: 'monospace' }}>
+              We’re sitting on a large library of real business stories and cases. We match your profile against it and send you the ones carrying lessons you can act on right away — think of it as a consultant looking at your situation and hand-picking the most useful stories for you. It’s about the most personalized email you’ll ever get. Show interest and we’ll keep you in the loop as we roll it out.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -12,20 +12,26 @@ export async function GET(req: NextRequest) {
 
   const { data } = await supabase
     .from('product_interests')
-    .select('product_key, status, email, session_id')
+    .select('product_key, status, email, session_id, note, created_at')
     .eq('is_test', mode === 'demo')
+    .order('created_at', { ascending: false })
 
   const summary: Record<string, { interested: number; not_interested: number }> = {
     newsletter: { interested: 0, not_interested: 0 },
     work_your_plan: { interested: 0, not_interested: 0 },
+    open_suggestions: { interested: 0, not_interested: 0 },
   }
   const emails = new Set<string>()
+  const suggestions: { email: string | null; note: string; created_at: string }[] = []
   for (const r of data || []) {
     if (!summary[r.product_key]) summary[r.product_key] = { interested: 0, not_interested: 0 }
     if (r.status === 'interested') summary[r.product_key].interested += 1
     else if (r.status === 'not_interested') summary[r.product_key].not_interested += 1
     if (r.status === 'interested' && r.email) emails.add(r.email)
+    if (r.product_key === 'open_suggestions' && (r as any).note) {
+      suggestions.push({ email: r.email, note: (r as any).note, created_at: r.created_at })
+    }
   }
 
-  return NextResponse.json({ summary, uniqueInterestedEmails: emails.size })
+  return NextResponse.json({ summary, uniqueInterestedEmails: emails.size, suggestions })
 }

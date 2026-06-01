@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
-const PRODUCTS = ['newsletter', 'work_your_plan'] as const
+const PRODUCTS = ['newsletter', 'work_your_plan', 'open_suggestions'] as const
 const STATUSES = ['interested', 'not_interested'] as const
 
 // One generic endpoint for any product-interest toggle on the client dashboard.
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const { sessionId, productKey, status, email } = await req.json()
+  const { sessionId, productKey, status, email, note } = await req.json()
   if (!sessionId) return NextResponse.json({ error: 'No session ID' }, { status: 400 })
   if (!PRODUCTS.includes(productKey)) return NextResponse.json({ error: 'Bad product' }, { status: 400 })
   if (!STATUSES.includes(status)) return NextResponse.json({ error: 'Bad status' }, { status: 400 })
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     .single()
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
 
-  const row = {
+  const row: Record<string, any> = {
     session_id: sessionId,
     product_key: productKey,
     status,
@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     is_test: session.is_test ?? false,
     updated_at: new Date().toISOString(),
   }
+  if (typeof note === 'string' && note.trim()) row.note = note.trim().slice(0, 2000)
 
   // Upsert on (session_id, product_key) — toggling just flips status.
   const { error } = await supabase

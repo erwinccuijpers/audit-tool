@@ -409,7 +409,7 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
 
 function FunnelView({ sessions, dataMode }: { sessions: Session[]; dataMode: 'real' | 'demo' }) {
   // Product-interest leads (service-role summary; respects Real/Demo).
-  const [leads, setLeads] = useState<{ summary: Record<string, { interested: number; not_interested: number }>; uniqueInterestedEmails: number } | null>(null)
+  const [leads, setLeads] = useState<{ summary: Record<string, { interested: number; not_interested: number }>; uniqueInterestedEmails: number; suggestions?: { email: string | null; note: string; created_at: string }[] } | null>(null)
   useEffect(() => {
     let active = true
     fetch(`/api/leads-summary?mode=${dataMode}`).then(r => r.json()).then(d => { if (active) setLeads(d) }).catch(() => {})
@@ -522,6 +522,7 @@ function FunnelView({ sessions, dataMode }: { sessions: Session[]; dataMode: 're
           {[
             { lbl: 'NEWSLETTER', key: 'newsletter', accent: '#C8A96E' },
             { lbl: 'WORK YOUR PLAN', key: 'work_your_plan', accent: '#9A8A6A' },
+            { lbl: 'SUGGESTIONS', key: 'open_suggestions', accent: '#7EB8A4' },
             { lbl: 'UNIQUE LEAD EMAILS', key: '__emails', accent: '#7AAA7A' },
           ].map(c => {
             const s = leads?.summary?.[c.key]
@@ -541,6 +542,21 @@ function FunnelView({ sessions, dataMode }: { sessions: Session[]; dataMode: 're
         <div style={{ ...mono, fontSize: 9, color: '#2A2A20', marginTop: 10 }}>
           Captured from the dashboard email0 preview + Work-your-plan card. {dataMode === 'demo' ? 'Showing demo leads.' : 'Real leads only.'}
         </div>
+        {leads?.suggestions && leads.suggestions.length > 0 && (
+          <div style={{ marginTop: 14, borderTop: '1px solid #1A1A14', paddingTop: 12 }}>
+            <div style={{ ...mono, fontSize: 9, letterSpacing: '0.12em', color: '#7EB8A4', marginBottom: 8 }}>OPEN SUGGESTIONS</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {leads.suggestions.map((s, i) => (
+                <div key={i} style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 6, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 12, color: '#C0B8A8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{s.note}</div>
+                  <div style={{ ...mono, fontSize: 9, color: '#3A3A28', marginTop: 6 }}>
+                    {s.email || 'no email'} · {new Date(s.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Conversion funnel */}
