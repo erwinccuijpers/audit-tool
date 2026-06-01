@@ -1,11 +1,26 @@
 'use client'
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, type ReactNode } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { ensureReport } from '@/lib/report'
 import ClientNav from '@/components/ClientNav'
 
 const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+
+// Focused full-screen overlay — clearer than an inline reveal, especially on mobile.
+function FullScreenPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(8,8,6,0.97)', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ position: 'sticky', top: 0, background: '#0C0C09', borderBottom: '1px solid #1A1A14', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, zIndex: 1 }}>
+        <span style={{ fontSize: 11, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace', flex: 1 }}>{title}</span>
+        <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6, padding: '7px 13px', color: '#9A9080', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer' }}>✕ Close</button>
+      </div>
+      <div style={{ maxWidth: 680, margin: '0 auto', padding: '24px 18px 64px' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 type ModuleDef = {
   key: string
@@ -48,6 +63,7 @@ function HubContent() {
   const [interestEmail, setInterestEmail] = useState('')
   const [savingInterest, setSavingInterest] = useState<string | null>(null)
   const [showEmail0, setShowEmail0] = useState(false)
+  const [showSuggestion, setShowSuggestion] = useState(false)
   const [suggestionText, setSuggestionText] = useState('')
   const [suggestionSent, setSuggestionSent] = useState(false)
 
@@ -133,7 +149,7 @@ function HubContent() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, productKey: 'open_suggestions', status: 'interested', email, note: suggestionText.trim() }),
       })
-      if (r.ok) { setSuggestionSent(true); setInterests(prev => ({ ...prev, open_suggestions: 'interested' })) }
+      if (r.ok) { setSuggestionSent(true); setShowSuggestion(false); setInterests(prev => ({ ...prev, open_suggestions: 'interested' })) }
     } catch { /* ignore */ }
     setSavingInterest(null)
   }
@@ -381,9 +397,9 @@ function HubContent() {
               Every email a new, usable lesson — drawn from real cases that fit your business. Not a generic newsletter.
             </p>
             <button
-              onClick={() => setShowEmail0(v => !v)}
+              onClick={() => setShowEmail0(true)}
               style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #C8A96E66', borderRadius: 6, padding: '7px 14px', color: '#C8A96E', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', letterSpacing: '0.04em' }}
-            >{showEmail0 ? 'Hide example' : 'Let me read it first →'}</button>
+            >Let me read it first →</button>
             <InterestControl productKey="newsletter" accent="#C8A96E" />
           </div>
 
@@ -410,54 +426,67 @@ function HubContent() {
             {suggestionSent ? (
               <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#6AA36A', marginTop: 2 }}>✓ Thanks — we’ll be in touch.</div>
             ) : (
-              <>
-                <textarea
-                  value={suggestionText}
-                  onChange={e => setSuggestionText(e.target.value)}
-                  placeholder="e.g. I'd like to work with you · I want to white-label this for my consulting business · I need this specific feature…"
-                  rows={3}
-                  style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '9px 11px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 12, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
-                />
-                {!userEmail && (
-                  <input
-                    placeholder="your@email.com" type="email" value={interestEmail}
-                    onChange={e => setInterestEmail(e.target.value)}
-                    style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '8px 11px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box' }}
-                  />
-                )}
-                <button
-                  onClick={submitSuggestion}
-                  disabled={savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())}
-                  style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '7px 14px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', opacity: (savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())) ? 0.5 : 1 }}
-                >{savingInterest === 'open_suggestions' ? 'Sending…' : 'Send suggestion →'}</button>
-              </>
+              <button
+                onClick={() => setShowSuggestion(true)}
+                style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '7px 14px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', letterSpacing: '0.04em' }}
+              >Write a suggestion →</button>
             )}
           </div>
         </div>
-
-        {/* Revealed email0 example (full width) + footer explainer */}
-        {showEmail0 && (
-          <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>EXAMPLE — YOUR FIRST EMAIL</span>
-              {email0?.area && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#7EB8A4', border: '1px solid #234', borderRadius: 3, padding: '1px 6px' }}>{email0.area}</span>}
-            </div>
-            {email0Loading && !email0 && <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440' }}>Writing your example…</p>}
-            {email0 && (
-              <div style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 8, padding: '18px 20px', marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>Subject</div>
-                <div style={{ fontSize: 16, color: '#E8E0D0', marginBottom: 14 }}>{email0.subject}</div>
-                <div style={{ fontSize: 14, lineHeight: 1.7, color: '#C0B8A8', whiteSpace: 'pre-wrap' }}>{email0.body}</div>
-              </div>
-            )}
-            {!email0 && !email0Loading && <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440', marginBottom: 14 }}>Your example will appear once your diagnostic is processed.</p>}
-            {/* Footer explainer — what's going on */}
-            <div style={{ borderTop: '1px solid #1A1A14', paddingTop: 14, fontSize: 12, lineHeight: 1.75, color: '#6A6450', fontFamily: 'monospace' }}>
-              We’re sitting on a large library of real business stories and cases. We match your profile against it and send you the ones carrying lessons you can act on right away — think of it as a consultant looking at your situation and hand-picking the most useful stories for you. It’s about the most personalized email you’ll ever get. Show interest and we’ll keep you in the loop as we roll it out.
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Full-screen email0 example */}
+      {showEmail0 && (
+        <FullScreenPanel title="YOUR FIRST EMAIL — EXAMPLE" onClose={() => setShowEmail0(false)}>
+          {email0Loading && !email0 && <p style={{ fontSize: 14, fontFamily: 'monospace', color: '#5A5440' }}>Writing your example…</p>}
+          {email0 && (
+            <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: 10, padding: '22px 24px', marginBottom: 18 }}>
+              {email0.area && <div style={{ fontSize: 9, fontFamily: 'monospace', color: '#7EB8A4', marginBottom: 12, letterSpacing: '0.12em' }}>FOCUS · {email0.area.toUpperCase()}</div>}
+              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>Subject</div>
+              <div style={{ fontSize: 18, color: '#E8E0D0', marginBottom: 18 }}>{email0.subject}</div>
+              <div style={{ fontSize: 15, lineHeight: 1.75, color: '#C8C0B0', whiteSpace: 'pre-wrap' }}>{email0.body}</div>
+            </div>
+          )}
+          {!email0 && !email0Loading && <p style={{ fontSize: 14, fontFamily: 'monospace', color: '#5A5440' }}>Your example will appear once your diagnostic is processed.</p>}
+          <div style={{ fontSize: 12.5, lineHeight: 1.8, color: '#6A6450', fontFamily: 'monospace', borderTop: '1px solid #1A1A14', paddingTop: 16 }}>
+            We’re sitting on a large library of real business stories and cases. We match your profile against it and send you the ones carrying lessons you can act on right away — think of it as a consultant looking at your situation and hand-picking the most useful stories for you. It’s about the most personalized email you’ll ever get. Show interest and we’ll keep you in the loop as we roll it out.
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <InterestControl productKey="newsletter" accent="#C8A96E" />
+          </div>
+        </FullScreenPanel>
+      )}
+
+      {/* Full-screen suggestion form — roomy on mobile */}
+      {showSuggestion && (
+        <FullScreenPanel title="SEND US A SUGGESTION" onClose={() => setShowSuggestion(false)}>
+          <p style={{ fontSize: 14, lineHeight: 1.6, color: '#908870', fontFamily: 'monospace', marginTop: 0, marginBottom: 16 }}>
+            Have an idea, want to work with us, or need a custom feature? Write as much as you like — we read every one and notify you when we roll it out.
+          </p>
+          <textarea
+            value={suggestionText}
+            onChange={e => setSuggestionText(e.target.value)}
+            placeholder="e.g. I'd like to work with you · I want to white-label this for my own consulting business · I need this specific feature…"
+            autoFocus
+            style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 8, padding: '14px 16px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14, lineHeight: 1.6, resize: 'vertical', width: '100%', boxSizing: 'border-box', minHeight: '40vh' }}
+          />
+          {!userEmail && (
+            <input
+              placeholder="your@email.com" type="email" value={interestEmail}
+              onChange={e => setInterestEmail(e.target.value)}
+              style={{ marginTop: 12, background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 8, padding: '11px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14, width: '100%', boxSizing: 'border-box' }}
+            />
+          )}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button
+              onClick={submitSuggestion}
+              disabled={savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())}
+              style={{ background: 'transparent', border: '1px solid #7EB8A4', borderRadius: 6, padding: '10px 20px', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer', opacity: (savingInterest === 'open_suggestions' || !suggestionText.trim() || !(userEmail || interestEmail.trim())) ? 0.5 : 1 }}
+            >{savingInterest === 'open_suggestions' ? 'Sending…' : 'Send suggestion →'}</button>
+            <button onClick={() => setShowSuggestion(false)} style={{ background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6, padding: '10px 18px', color: '#6A6450', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </FullScreenPanel>
+      )}
     </div>
   )
 }
