@@ -407,7 +407,15 @@ function CategoryBucketsView({ sessions, isFullAdmin, onReloadSessions, sessions
   )
 }
 
-function FunnelView({ sessions }: { sessions: Session[] }) {
+function FunnelView({ sessions, dataMode }: { sessions: Session[]; dataMode: 'real' | 'demo' }) {
+  // Product-interest leads (service-role summary; respects Real/Demo).
+  const [leads, setLeads] = useState<{ summary: Record<string, { interested: number; not_interested: number }>; uniqueInterestedEmails: number } | null>(null)
+  useEffect(() => {
+    let active = true
+    fetch(`/api/leads-summary?mode=${dataMode}`).then(r => r.json()).then(d => { if (active) setLeads(d) }).catch(() => {})
+    return () => { active = false }
+  }, [dataMode])
+
   const total = sessions.length
   const anyActivity = sessions.filter(s => (s.current_q_index || 0) > 0).length
   const reachedQ6 = sessions.filter(s => (s.current_q_index || 0) >= 6).length
@@ -504,6 +512,34 @@ function FunnelView({ sessions }: { sessions: Session[] }) {
         </div>
         <div style={{ ...mono, fontSize: 9, color: '#2A2A20', marginTop: 10 }}>
           Churned = unfinished sessions that already incurred cost — partial data captured, worth a follow-up.
+        </div>
+      </div>
+
+      {/* Product interest — lead-gen signals from the dashboard */}
+      <div style={card()}>
+        <SectionLabel>PRODUCT INTEREST</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 4 }}>
+          {[
+            { lbl: 'NEWSLETTER', key: 'newsletter', accent: '#C8A96E' },
+            { lbl: 'WORK YOUR PLAN', key: 'work_your_plan', accent: '#9A8A6A' },
+            { lbl: 'UNIQUE LEAD EMAILS', key: '__emails', accent: '#7AAA7A' },
+          ].map(c => {
+            const s = leads?.summary?.[c.key]
+            const val = c.key === '__emails' ? (leads?.uniqueInterestedEmails ?? 0) : (s?.interested ?? 0)
+            const sub = c.key === '__emails'
+              ? 'interested, deduped'
+              : `${s?.interested ?? 0} in · ${s?.not_interested ?? 0} out`
+            return (
+              <div key={c.lbl} style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 6, padding: '12px 14px' }}>
+                <div style={{ color: c.accent, fontFamily: 'monospace', fontSize: 20, fontWeight: 300 }}>{val}</div>
+                <div style={{ ...label(), fontSize: 9, marginTop: 4 }}>{c.lbl}</div>
+                <div style={{ ...mono, fontSize: 9, color: '#3A3A28', marginTop: 4 }}>{sub}</div>
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ ...mono, fontSize: 9, color: '#2A2A20', marginTop: 10 }}>
+          Captured from the dashboard email0 preview + Work-your-plan card. {dataMode === 'demo' ? 'Showing demo leads.' : 'Real leads only.'}
         </div>
       </div>
 
@@ -1681,7 +1717,7 @@ export default function AdminPage() {
         ) : (
           <>
             {activeTab === 'funnel' && (
-              <FunnelView sessions={sessions} />
+              <FunnelView sessions={sessions} dataMode={dataMode} />
             )}
 
             {activeTab === 'patterns' && (

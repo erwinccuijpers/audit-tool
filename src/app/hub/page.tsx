@@ -40,6 +40,14 @@ function HubContent() {
   const [authError, setAuthError] = useState('')
   const [justSaved, setJustSaved] = useState(false)
 
+  // Lead-gen: email0 briefing preview + per-product interest toggles
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [email0, setEmail0] = useState<{ subject: string; body: string; area: string; source_ref?: string } | null>(null)
+  const [email0Loading, setEmail0Loading] = useState(false)
+  const [interests, setInterests] = useState<Record<string, string>>({})
+  const [interestEmail, setInterestEmail] = useState('')
+  const [savingInterest, setSavingInterest] = useState<string | null>(null)
+
   useEffect(() => {
     if (!sessionId) { setError('No session ID.'); setLoading(false); return }
     load()
@@ -57,19 +65,60 @@ function HubContent() {
     // Show the save CTA only when nobody is logged in AND this session isn't linked yet.
     const { data: { user } } = await supabase.auth.getUser()
     setClaimed(!!user || !!session.user_id)
+    if (user?.email) { setUserEmail(user.email); setInterestEmail(user.email) }
     if (session.dashboard_cache?.v === 2) {
       setPillarsCovered(Object.keys(session.dashboard_cache?.pillars || {}).length)
     }
 
     // Generate the report once on first arrival, so the hub lands with it ready.
+    let ready = false
     if (session.report) {
-      setReportReady(true)
+      ready = true; setReportReady(true)
     } else if (session.status === 'interview_done' || session.status === 'completed') {
       setBuilding(true)
       const res = await ensureReport(sessionId!)
-      setReportReady(!res.error)
+      ready = !res.error; setReportReady(ready)
     }
     setLoading(false)
+
+    // Once the diagnostic is done, load the email0 preview + any saved product interest.
+    if (ready) loadBriefing()
+  }
+
+  async function loadBriefing() {
+    // Current interest state (so toggles render correctly; email prefill if captured before)
+    try {
+      const r = await fetch(`/api/product-interest?session=${sessionId}`)
+      const d = await r.json()
+      if (d.interests) setInterests(d.interests)
+      if (d.email && !userEmail) setInterestEmail(d.email)
+    } catch { /* non-critical */ }
+
+    // The email0 taster (cached server-side after first generation)
+    setEmail0Loading(true)
+    try {
+      const r = await fetch('/api/briefing-preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+      const d = await r.json()
+      if (d.email0) setEmail0(d.email0)
+    } catch { /* leave preview hidden */ }
+    setEmail0Loading(false)
+  }
+
+  async function toggleInterest(productKey: string, status: 'interested' | 'not_interested') {
+    const email = userEmail || interestEmail.trim() || null
+    if (status === 'interested' && !email) return // UI requires an email first
+    setSavingInterest(productKey)
+    try {
+      const r = await fetch('/api/product-interest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, productKey, status, email }),
+      })
+      if (r.ok) setInterests(prev => ({ ...prev, [productKey]: status }))
+    } catch { /* ignore */ }
+    setSavingInterest(null)
   }
 
   async function handleSave() {
@@ -134,16 +183,54 @@ function HubContent() {
       available: true,
       primary: { text: 'Read transcript →', href: `/history?session=${sessionId}` },
     },
-    {
-      key: 'implement',
-      label: 'COMING SOON',
-      title: 'Work your plan',
-      desc: 'Turn the analysis into action — tool walkthroughs, vetted experts to implement for you, and sources to dig deeper.',
-      accent: '#5A5440',
-      available: false,
-      badge: 'In development',
-    },
   ]
+
+  // Lean Interested / Not-interested control (shared by both lead-gen cards).
+  function InterestControl({ productKey, accent }: { productKey: string; accent: string }) {
+    const status = interests[productKey]
+    const saving = savingInterest === productKey
+    const knownEmail = userEmail || interestEmail.trim()
+    // No email captured yet (anonymous, first interaction) → ask for it once.
+    if (!knownEmail && !status) {
+      return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 4 }}>
+          <input
+            placeholder="your@email.com" type="email" value={interestEmail}
+            onChange={e => setInterestEmail(e.target.value)}
+            style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '8px 12px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 13, minWidth: 200, flex: 1 }}
+          />
+          <button
+            onClick={() => toggleInterest(productKey, 'interested')}
+            disabled={saving || !interestEmail.trim()}
+            style={{ background: 'transparent', border: `1px solid ${accent}`, borderRadius: 6, padding: '8px 14px', color: accent, fontFamily: 'monospace', fontSize: 12, cursor: saving || !interestEmail.trim() ? 'default' : 'pointer', opacity: saving || !interestEmail.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}
+          >{saving ? 'Saving…' : "I'm interested →"}</button>
+        </div>
+      )
+    }
+    // Email known → prefill + lean two-state toggle.
+    return (
+      <div style={{ marginTop: 4 }}>
+        <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>
+          {status === 'interested' ? '✓ ' : ''}We’ll send to <span style={{ color: '#908870' }}>{knownEmail}</span>
+        </div>
+        <div style={{ display: 'inline-flex', border: '1px solid #2A2A1E', borderRadius: 6, overflow: 'hidden' }}>
+          {(['interested', 'not_interested'] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => toggleInterest(productKey, s)}
+              disabled={saving}
+              style={{
+                background: status === s ? (s === 'interested' ? `${accent}22` : '#1A1410') : 'transparent',
+                border: 'none', padding: '7px 14px',
+                color: status === s ? (s === 'interested' ? accent : '#9A7A5A') : '#4A4A38',
+                fontFamily: 'monospace', fontSize: 12, cursor: saving ? 'default' : 'pointer',
+              }}
+            >{s === 'interested' ? 'Interested' : 'Not interested'}</button>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#0C0C09', color: '#E8E0D0', fontFamily: 'Georgia, serif' }}>
@@ -255,6 +342,52 @@ function HubContent() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* ── email0 — weekly briefing preview (lead magnet) ──────────────────── */}
+        <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>YOUR WEEKLY BRIEFING</span>
+            <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>PREVIEW · EMAIL #1</span>
+            {email0?.area && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#7EB8A4', border: '1px solid #234', borderRadius: 3, padding: '1px 6px' }}>{email0.area}</span>}
+          </div>
+          <div style={{ fontSize: 18, color: '#D0C8B8', marginBottom: 4 }}>A taste of what lands in your inbox</div>
+
+          {email0Loading && !email0 && (
+            <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440' }}>Writing your first briefing…</p>
+          )}
+          {email0 && (
+            <div style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 8, padding: '18px 20px', margin: '10px 0 14px' }}>
+              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#5A5440', marginBottom: 8 }}>Subject</div>
+              <div style={{ fontSize: 16, color: '#E8E0D0', marginBottom: 14 }}>{email0.subject}</div>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: '#C0B8A8', whiteSpace: 'pre-wrap' }}>{email0.body}</div>
+              {email0.source_ref && <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#3A3A28', marginTop: 14 }}>ref {email0.source_ref}</div>}
+            </div>
+          )}
+          {!email0 && !email0Loading && (
+            <p style={{ fontSize: 13, fontFamily: 'monospace', color: '#5A5440', margin: '8px 0 14px' }}>
+              Your personalized briefing will appear here shortly after your diagnostic is processed.
+            </p>
+          )}
+
+          {/* Pitch copy is a placeholder — to be refined later. */}
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: '0 0 4px', maxWidth: 560 }}>
+            Want a fresh one of these every week — matched to your business? Free during the test, no card.
+          </p>
+          <InterestControl productKey="newsletter" accent="#C8A96E" />
+        </div>
+
+        {/* ── Work your plan (interest capture) ───────────────────────────────── */}
+        <div style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '22px 24px', marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#9A8A6A', fontFamily: 'monospace' }}>WORK YOUR PLAN</span>
+            <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
+          </div>
+          <div style={{ fontSize: 18, color: '#D0C8B8', marginBottom: 4 }}>Turn the analysis into action</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: '0 0 4px', maxWidth: 560 }}>
+            Tool walkthroughs, vetted experts to implement for you, and sources to dig deeper. Want this when it’s ready?
+          </p>
+          <InterestControl productKey="work_your_plan" accent="#9A8A6A" />
         </div>
       </div>
     </div>
