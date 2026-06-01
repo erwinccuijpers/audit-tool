@@ -1398,6 +1398,156 @@ function FeedbackView() {
   )
 }
 
+// ── Leads tab — product interest counts, email export, suggestion analysis ──────
+type LeadRow = { product_key: string; email: string; created_at: string; business_name: string; completed: boolean }
+type LeadsData = {
+  summary: Record<string, { interested: number; not_interested: number }>
+  uniqueInterestedEmails: number
+  suggestions: { email: string | null; note: string; created_at: string; business_name: string }[]
+  leads: LeadRow[]
+}
+
+function LeadsView({ dataMode }: { dataMode: 'real' | 'demo' }) {
+  const [data, setData] = useState<LeadsData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState('')
+  const [analysis, setAnalysis] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true); setAnalysis('')
+    fetch(`/api/leads-summary?mode=${dataMode}`).then(r => r.json()).then(d => { if (active) { setData(d); setLoading(false) } }).catch(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [dataMode])
+
+  const PRODUCTS = [
+    { key: 'newsletter', label: 'Personalized briefing', accent: '#C8A96E' },
+    { key: 'work_your_plan', label: 'Work your plan', accent: '#9A8A6A' },
+  ]
+
+  function emailsFor(productKey: string) {
+    return [...new Set((data?.leads || []).filter(l => l.product_key === productKey).map(l => l.email))]
+  }
+  function completedCountFor(productKey: string) {
+    return (data?.leads || []).filter(l => l.product_key === productKey && l.completed).length
+  }
+  async function copyEmails(productKey: string) {
+    const list = emailsFor(productKey).join(', ')
+    try { await navigator.clipboard.writeText(list); setCopied(productKey); setTimeout(() => setCopied(''), 1500) } catch { /* ignore */ }
+  }
+  function downloadCSV(productKey: string) {
+    const rows = (data?.leads || []).filter(l => l.product_key === productKey)
+    const csv = ['email,business,completed_interview,date', ...rows.map(r => `${r.email},"${(r.business_name || '').replace(/"/g, '""')}",${r.completed},${r.created_at.slice(0, 10)}`)].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `leads_${productKey}_${dataMode}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+  async function runAnalysis() {
+    setAnalyzing(true)
+    try {
+      const r = await fetch('/api/analyze-suggestions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: dataMode }) })
+      const d = await r.json()
+      setAnalysis(d.analysis || d.error || 'No result.')
+    } catch { setAnalysis('Analysis failed.') }
+    setAnalyzing(false)
+  }
+
+  if (loading) return <div style={{ ...mono, fontSize: 12, color: '#3A3A28', padding: '40px 0', textAlign: 'center' }}>Loading leads…</div>
+
+  const sg = data?.suggestions || []
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Env banner */}
+      <div style={{ ...mono, fontSize: 11, color: dataMode === 'demo' ? '#E0905A' : '#7AAA7A' }}>
+        {dataMode === 'demo'
+          ? 'DEMO leads — curious / fictional-business visitors. Switch the header toggle to REAL for serious finalizers.'
+          : 'REAL leads — people who ran their actual business. Toggle the header to DEMO for curious visitors.'}
+      </div>
+
+      {/* Counters */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+        {[
+          { lbl: 'NEWSLETTER', n: data?.summary?.newsletter?.interested ?? 0, sub: `${completedCountFor('newsletter')} completed interview`, accent: '#C8A96E' },
+          { lbl: 'WORK YOUR PLAN', n: data?.summary?.work_your_plan?.interested ?? 0, sub: `${completedCountFor('work_your_plan')} completed interview`, accent: '#9A8A6A' },
+          { lbl: 'SUGGESTIONS', n: data?.summary?.open_suggestions?.interested ?? 0, sub: 'free-text submitted', accent: '#7EB8A4' },
+          { lbl: 'UNIQUE LEAD EMAILS', n: data?.uniqueInterestedEmails ?? 0, sub: 'deduped', accent: '#7AAA7A' },
+        ].map(c => (
+          <div key={c.lbl} style={card({ padding: '14px 16px' })}>
+            <div style={{ color: c.accent, fontFamily: 'monospace', fontSize: 24, fontWeight: 300 }}>{c.n}</div>
+            <div style={{ ...label(), fontSize: 9, marginTop: 4 }}>{c.lbl}</div>
+            <div style={{ ...mono, fontSize: 9, color: '#3A3A28', marginTop: 4 }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-product email export */}
+      {PRODUCTS.map(p => {
+        const emails = emailsFor(p.key)
+        return (
+          <div key={p.key} style={card()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+              <SectionLabel>{`${p.label.toUpperCase()} — ${emails.length} EMAILS`}</SectionLabel>
+              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <button onClick={() => copyEmails(p.key)} disabled={emails.length === 0}
+                  style={{ background: 'transparent', border: `1px solid ${p.accent}55`, borderRadius: 5, padding: '5px 11px', color: emails.length ? p.accent : '#3A3A28', ...mono, fontSize: 11, cursor: emails.length ? 'pointer' : 'default' }}>
+                  {copied === p.key ? '✓ copied' : 'Copy emails'}
+                </button>
+                <button onClick={() => downloadCSV(p.key)} disabled={emails.length === 0}
+                  style={{ background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 5, padding: '5px 11px', color: emails.length ? '#9A9080' : '#3A3A28', ...mono, fontSize: 11, cursor: emails.length ? 'pointer' : 'default' }}>
+                  ⤓ CSV
+                </button>
+              </div>
+            </div>
+            {emails.length === 0
+              ? <div style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>No interest captured yet in this environment.</div>
+              : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {(data?.leads || []).filter(l => l.product_key === p.key).map((l, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, ...mono, fontSize: 11, color: '#C0B8A8' }}>
+                      <span style={{ minWidth: 220 }}>{l.email}</span>
+                      <span style={{ color: '#5A5440' }}>{l.business_name || '—'}</span>
+                      {l.completed && <span style={{ color: '#7AAA7A', fontSize: 9, border: '1px solid #2A3A2A', borderRadius: 3, padding: '0 5px' }}>completed</span>}
+                      <span style={{ marginLeft: 'auto', color: '#3A3A28', fontSize: 10 }}>{l.created_at.slice(0, 10)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+        )
+      })}
+
+      {/* Open suggestions + AI analysis */}
+      <div style={card()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          <SectionLabel>{`OPEN SUGGESTIONS — ${sg.length}`}</SectionLabel>
+          <button onClick={runAnalysis} disabled={analyzing || sg.length === 0}
+            style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid #7EB8A455', borderRadius: 5, padding: '5px 11px', color: sg.length ? '#7EB8A4' : '#3A3A28', ...mono, fontSize: 11, cursor: sg.length ? 'pointer' : 'default' }}>
+            {analyzing ? 'Analyzing…' : '✦ Analyze with AI'}
+          </button>
+        </div>
+        {analysis && (
+          <div style={{ background: '#0C0C09', border: '1px solid #1A2A24', borderRadius: 6, padding: '14px 16px', marginBottom: 12, fontSize: 12.5, lineHeight: 1.6, color: '#C0B8A8', whiteSpace: 'pre-wrap' }}>{analysis}</div>
+        )}
+        {sg.length === 0
+          ? <div style={{ ...mono, fontSize: 11, color: '#3A3A28' }}>No suggestions yet.</div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sg.map((s, i) => (
+                <div key={i} style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 6, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 12.5, color: '#C0B8A8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{s.note}</div>
+                  <div style={{ ...mono, fontSize: 9, color: '#3A3A28', marginTop: 6 }}>{s.email || 'no email'} · {s.business_name || '—'} · {s.created_at.slice(0, 10)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main admin page ───────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -1412,7 +1562,7 @@ export default function AdminPage() {
     () => allSessions.filter(s => dataMode === 'demo' ? !!s.is_test : !s.is_test),
     [allSessions, dataMode]
   )
-  const [activeTab, setActiveTab] = useState<'funnel' | 'patterns' | 'clients' | 'feedback' | 'chat'>('funnel')
+  const [activeTab, setActiveTab] = useState<'funnel' | 'patterns' | 'clients' | 'leads' | 'feedback' | 'chat'>('funnel')
   const [search, setSearch] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
   const [adminRole, setAdminRole] = useState<'full' | 'readonly'>('full')
@@ -1565,6 +1715,7 @@ export default function AdminPage() {
     { key: 'funnel', label: 'Funnel' },
     { key: 'patterns', label: 'Patterns' },
     { key: 'clients', label: `Clients (${sessions.length})` },
+    { key: 'leads', label: 'Leads' },
     { key: 'feedback', label: 'Feedback' },
     { key: 'chat', label: 'Chat' },
   ]
@@ -1763,6 +1914,10 @@ export default function AdminPage() {
                   ))
                 )}
               </div>
+            )}
+
+            {activeTab === 'leads' && (
+              <LeadsView dataMode={dataMode} />
             )}
 
             {activeTab === 'feedback' && (
