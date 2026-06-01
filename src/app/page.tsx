@@ -194,6 +194,8 @@ export default function InterviewPage() {
   const [resumeIdFromUrl, setResumeIdFromUrl] = useState<string | null>(null)
   const [answeredIds, setAnsweredIds] = useState<string[]>([])
   const [utmParams, setUtmParams] = useState<Record<string, string>>({})
+  // ?test=1 in the URL tags this session as demo/test data so it stays out of real stats
+  const [isTest, setIsTest] = useState(false)
   // Auto-dashboard notification state
   const [dashboardNotif, setDashboardNotif] = useState<'idle' | 'creating' | 'ready'>('idle')
   const [dashboardNotifStage, setDashboardNotifStage] = useState<'first' | 'halfway'>('first')
@@ -226,6 +228,7 @@ export default function InterviewPage() {
       if (v) utm[key] = v
     }
     if (Object.keys(utm).length > 0) setUtmParams(utm)
+    if (params.get('test') === '1') setIsTest(true)
   }, [])
 
   // Once auth is confirmed and questions are loaded, resume the session from the link
@@ -361,6 +364,7 @@ export default function InterviewPage() {
     const { data } = await supabase
       .from('sessions')
       .insert({ business_name: businessName, status: 'intro', user_id: user?.id ?? null, language: effectiveLanguage, ...utmParams,
+        is_test: isTest,
         // v:2 marks this as a pillar-mode session — detected on resume
         dashboard_cache: { v: 2, pillars: {} } })
       .select()

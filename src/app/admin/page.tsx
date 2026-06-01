@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 
 const ADMIN_EMAIL = 'erwinccuijpers@gmail.com'
@@ -31,6 +31,7 @@ type Session = {
   country?: string | null
   city?: string | null
   scores?: Record<string, number> | null
+  is_test?: boolean | null
 }
 
 // True for new pillar-architecture sessions
@@ -1320,8 +1321,15 @@ function FeedbackView() {
 export default function AdminPage() {
   const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const [sessions, setSessions] = useState<Session[]>([])
+  const [allSessions, setAllSessions] = useState<Session[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
+  // Real vs Demo data view. Demo = sessions tagged is_test (via ?test=1). Defaults to Real.
+  const [dataMode, setDataMode] = useState<'real' | 'demo'>('real')
+  // All downstream stats, buckets, lists and chat read this filtered view.
+  const sessions = useMemo(
+    () => allSessions.filter(s => dataMode === 'demo' ? !!s.is_test : !s.is_test),
+    [allSessions, dataMode]
+  )
   const [activeTab, setActiveTab] = useState<'funnel' | 'patterns' | 'clients' | 'feedback' | 'chat'>('funnel')
   const [search, setSearch] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
@@ -1360,9 +1368,9 @@ export default function AdminPage() {
     setSessionsLoading(true)
     const { data } = await supabase
       .from('sessions')
-      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at, user_id, dashboard_cache, questions_completed, input_tokens, output_tokens, cost_usd, niche, employee_count, size_band, revenue_band, years_in_business, region, country, city, scores')
+      .select('id, business_name, business_type, industry, business_description, owner_tone, status, current_q_index, completed_summaries, admin_analysis, created_at, user_id, dashboard_cache, questions_completed, input_tokens, output_tokens, cost_usd, niche, employee_count, size_band, revenue_band, years_in_business, region, country, city, scores, is_test')
       .order('created_at', { ascending: false })
-    setSessions(data || [])
+    setAllSessions(data || [])
     setSessionsLoading(false)
   }
 
@@ -1492,8 +1500,27 @@ export default function AdminPage() {
         <span style={{ color: '#1E1E14', fontFamily: 'monospace', fontSize: 10 }}>·</span>
         <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.12em' }}>ADMIN</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 10 }}>
-            {withData.length} sessions with data
+          {/* Real / Demo data view toggle. Demo = sessions tagged is_test via ?test=1. */}
+          <div style={{ display: 'flex', gap: 0, border: '1px solid #1E1E14', borderRadius: 6, overflow: 'hidden' }}>
+            {(['real', 'demo'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setDataMode(m)}
+                style={{
+                  background: dataMode === m ? (m === 'demo' ? '#2A1A0A' : '#1E1A10') : 'transparent',
+                  border: 'none',
+                  padding: '5px 12px',
+                  color: dataMode === m ? (m === 'demo' ? '#E0905A' : '#C8A96E') : '#3A3A28',
+                  fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                }}
+              >
+                {m === 'real' ? 'REAL' : 'DEMO'}
+              </button>
+            ))}
+          </div>
+          <span style={{ color: dataMode === 'demo' ? '#8A6A40' : '#2A2A20', fontFamily: 'monospace', fontSize: 10 }}>
+            {withData.length} sessions with data{dataMode === 'demo' ? ' · demo' : ''}
           </span>
 
           {/* Invite admin — full admins only */}
