@@ -14,23 +14,23 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://pocketcmo.pro"),
-  title: "Pocket CMO — Your AI business diagnostic",
+  title: "Pocket CMO — Your business diagnostic",
   description:
-    "A sharp, AI-led diagnostic interview that pinpoints where your business is leaving money on the table — and the highest-upside moves to fix it.",
+    "Built from real consulting experience: it walks you through the questions a sharp consultant would ask across your whole business, then shows you where you're leaving money on the table and the highest-upside moves to fix it. Do it in one go or pick it up whenever — your progress saves as you go.",
   applicationName: "Pocket CMO",
   openGraph: {
-    title: "Pocket CMO — Your AI business diagnostic",
+    title: "Pocket CMO — Your business diagnostic",
     description:
-      "Find where your business is leaving money on the table — and what to do about it.",
+      "Built from real consulting experience — find where your business is leaving money on the table, and what to fix first. Do it in one go or pick up where you left off.",
     url: "https://pocketcmo.pro",
     siteName: "Pocket CMO",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "Pocket CMO — Your AI business diagnostic",
+    title: "Pocket CMO — Your business diagnostic",
     description:
-      "Find where your business is leaving money on the table — and what to do about it.",
+      "Built from real consulting experience — find where your business is leaving money on the table, and what to fix first.",
   },
 };
 
