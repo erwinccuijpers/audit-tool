@@ -235,7 +235,10 @@ function HubContent() {
   ]
 
   // Lean Interested / Not-interested control (shared by both lead-gen cards).
-  function InterestControl({ productKey, accent }: { productKey: string; accent: string }) {
+  // Rendered as a plain function call (not <InterestControl/>) — defining a component
+  // inside HubContent gives it a new identity every render, which remounts the <input>
+  // and drops focus after each keystroke. Inlining the elements keeps focus stable.
+  const renderInterest = (productKey: string, accent: string) => {
     const status = interests[productKey]
     const saving = savingInterest === productKey
     const knownEmail = interestEmail.trim() || userEmail || ''
@@ -442,7 +445,7 @@ function HubContent() {
               onClick={() => setShowEmail0(true)}
               style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #C8A96E66', borderRadius: 6, padding: '7px 14px', color: '#C8A96E', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', letterSpacing: '0.04em' }}
             >Let me read it first →</button>
-            <InterestControl productKey="newsletter" accent="#C8A96E" />
+            {renderInterest('newsletter', '#C8A96E')}
           </div>
 
           {/* Work your plan */}
@@ -455,7 +458,7 @@ function HubContent() {
             <p style={{ fontSize: 12.5, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: 0, flex: 1 }}>
               Start working with your data: actionable implementation plans, and update your profile on the go as your business grows.
             </p>
-            <InterestControl productKey="work_your_plan" accent="#9A8A6A" />
+            {renderInterest('work_your_plan', '#9A8A6A')}
           </div>
 
           {/* Open suggestions */}
@@ -494,7 +497,7 @@ function HubContent() {
             We’re sitting on a large library of real business stories and cases. We match your profile against it and send you the ones carrying lessons you can act on right away — think of it as a consultant looking at your situation and hand-picking the most useful stories for you. It’s about the most personalized email you’ll ever get. Show interest and we’ll keep you in the loop as we roll it out.
           </div>
           <div style={{ marginTop: 18 }}>
-            <InterestControl productKey="newsletter" accent="#C8A96E" />
+            {renderInterest('newsletter', '#C8A96E')}
           </div>
         </FullScreenPanel>
       )}
