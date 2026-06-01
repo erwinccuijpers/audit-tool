@@ -17,6 +17,15 @@ const PILLAR_FOCUS: Record<string, string> = {
   people:       'team stability, retention, culture, how much relies on the owner personally, and what is at risk if a key person leaves',
 }
 
+// Per-type framing so the consultant speaks the owner's language instead of
+// defaulting to retail / D2C vocabulary (transactions, customers, baskets).
+const TYPE_GUIDANCE: Record<string, string> = {
+  walkin:  'A walk-in / physical-location business. "Customers", "footfall", "average basket / transaction value", "repeat visits" are natural terms here.',
+  service: 'An appointment- or project-based service business. Prefer "clients", "bookings / jobs", "project value", "pipeline", "retainer" over retail framing. There may be no walk-in traffic or "basket size".',
+  online:  'A primarily online business. "Sessions", "conversion rate", "AOV", "channels", "list / audience" fit. Avoid assuming a physical storefront.',
+  b2b:     'A B2B business selling to other companies. Prefer "accounts", "deals", "contract / account value", "pipeline", "sales cycle", "churn" over consumer-retail terms.',
+}
+
 export async function POST(req: NextRequest) {
   const {
     pillarName,
@@ -74,8 +83,9 @@ Do NOT ask about staff retention, team churn, hiring, who might leave, or workpl
     })
     .join('\n')
 
+  const typeGuidance = businessProfile?.business_type ? TYPE_GUIDANCE[businessProfile.business_type] : ''
   const profileBlock = businessProfile ? `Business: ${businessProfile.business_type} (${businessProfile.industry}) — ${businessProfile.business_description || 'no description yet'}
-Owner tone: ${businessProfile.owner_tone || 'unknown'}` : ''
+Owner tone: ${businessProfile.owner_tone || 'unknown'}${typeGuidance ? `\nFraming: ${typeGuidance}` : ''}` : ''
 
   const systemPrompt = `You are a sharp, warm business diagnostic consultant — not a survey bot. You're working through a structured diagnostic one section at a time. Right now you are covering: ${pillarLabel.toUpperCase()}.
 
@@ -91,6 +101,7 @@ ${questionBank}
 
 HOW TO WORK:
 - You are a consultant, not a form. Use the question bank as a menu, not a script.
+- The question bank is written in generic retail/D2C language. ALWAYS translate it into the vocabulary of THIS business (see Business + Framing above and the description). A real-estate portfolio has tenants, units, occupancy and yield — not "customers" and "baskets". A consultant has clients, engagements and a pipeline. Never use a term that would feel off to this owner.
 - If the owner's answer to one question reveals the answer to another, don't ask the redundant one.
 - If the conversation opens a better angle, take it.
 - If something from an earlier section is directly relevant here, connect it — "you mentioned earlier that you use Lightspeed, does that mean you can see..."

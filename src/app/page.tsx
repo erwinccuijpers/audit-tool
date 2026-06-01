@@ -690,6 +690,13 @@ export default function InterviewPage() {
       questions_total: PILLAR_ORDER.length,
     }).eq('id', sessionId)
 
+    // First completed section: nudge anonymous users to save their progress.
+    // (Manual "save progress" button stays available in the header regardless.)
+    if (Object.keys(updated).length === 1 && !user && !saveOverlayDismissed) {
+      setShowSaveOverlay(true)
+      setSaveOverlayDismissed(true)
+    }
+
     const nextIndex = currentPillarIndex + 1
     if (nextIndex >= PILLAR_ORDER.length) {
       await supabase.from('sessions').update({ status: 'interview_done' }).eq('id', sessionId)
@@ -1082,13 +1089,6 @@ export default function InterviewPage() {
         // Mark where the next question starts so we can extract only its replies for raw_answer
         questionConvStartRef.current = updatedConv.length
         setQIndex(nextIndex)
-
-        // Count this API response and show save overlay at the 5th response (once only)
-        claudeResponsesRef.current += 1
-        if (claudeResponsesRef.current >= 5 && !user && !saveOverlayDismissed) {
-          setShowSaveOverlay(true)
-          setSaveOverlayDismissed(true)
-        }
       }
     } else {
       if (message && message.trim().length > 0) {
@@ -1097,13 +1097,6 @@ export default function InterviewPage() {
         setConversation(prev => [...prev, assistantMsg])
         await saveResponse(currentQ.id, updatedConv)
         if (sessionId) sessionStorage.setItem(`conv_${sessionId}`, JSON.stringify(updatedConv))
-
-        // Count this API response and show save overlay at the 5th response (once only)
-        claudeResponsesRef.current += 1
-        if (claudeResponsesRef.current >= 5 && !user && !saveOverlayDismissed) {
-          setShowSaveOverlay(true)
-          setSaveOverlayDismissed(true)
-        }
       }
     }
 
@@ -1758,8 +1751,24 @@ export default function InterviewPage() {
           ))}
           {loading && !aiError && (
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
-              <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: '16px 16px 16px 4px', padding: '12px 16px' }}>
-                <span style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 12 }}>thinking...</span>
+              <style>{`@keyframes cmo-think { 0%, 100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }`}</style>
+              <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 9 }}>
+                {generatingSummary && pillarMode ? (
+                  <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 12 }}>
+                    Wrapping up {PILLAR_LABELS[PILLAR_ORDER[currentPillarIndex] as PillarName] || 'this section'} — pulling your findings together
+                  </span>
+                ) : (
+                  <span style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 12 }}>thinking</span>
+                )}
+                <span style={{ display: 'inline-flex', gap: 3 }}>
+                  {[0, 1, 2].map(i => (
+                    <span key={i} style={{
+                      width: 4, height: 4, borderRadius: '50%',
+                      background: generatingSummary && pillarMode ? '#C8A96E' : '#4A4A38',
+                      animation: `cmo-think 1.2s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                </span>
               </div>
             </div>
           )}

@@ -31,6 +31,15 @@ function HubContent() {
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState('')
 
+  // Account / save-session state — lets anonymous owners claim this report.
+  const [claimed, setClaimed] = useState(true) // true = logged in OR already linked; hides the CTA
+  const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [justSaved, setJustSaved] = useState(false)
+
   useEffect(() => {
     if (!sessionId) { setError('No session ID.'); setLoading(false); return }
     load()
@@ -39,11 +48,15 @@ function HubContent() {
   async function load() {
     const { data: session } = await supabase
       .from('sessions')
-      .select('business_name, status, report, dashboard_cache')
+      .select('business_name, status, report, dashboard_cache, user_id')
       .eq('id', sessionId!)
       .single()
     if (!session) { setError('Session not found.'); setLoading(false); return }
     setBusinessName(session.business_name || '')
+
+    // Show the save CTA only when nobody is logged in AND this session isn't linked yet.
+    const { data: { user } } = await supabase.auth.getUser()
+    setClaimed(!!user || !!session.user_id)
     if (session.dashboard_cache?.v === 2) {
       setPillarsCovered(Object.keys(session.dashboard_cache?.pillars || {}).length)
     }
@@ -57,6 +70,23 @@ function HubContent() {
       setReportReady(!res.error)
     }
     setLoading(false)
+  }
+
+  async function handleSave() {
+    if (!authEmail.trim() || !authPassword.trim()) { setAuthError('Enter an email and password.'); return }
+    setAuthLoading(true)
+    setAuthError('')
+    const { data, error } = authMode === 'signup'
+      ? await supabase.auth.signUp({ email: authEmail, password: authPassword })
+      : await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+    if (error) { setAuthError(error.message); setAuthLoading(false); return }
+    if (data.user && sessionId) {
+      await supabase.from('sessions').update({ user_id: data.user.id }).eq('id', sessionId)
+    }
+    setAuthLoading(false)
+    setJustSaved(true)
+    setClaimed(true)
+    setAuthEmail(''); setAuthPassword('')
   }
 
   if (loading) return (
@@ -130,6 +160,56 @@ function HubContent() {
         <p style={{ fontSize: 14, lineHeight: 1.7, color: '#908870', margin: '0 0 28px', maxWidth: 600 }}>
           Everything from your diagnostic lives here. Start with the report for the big picture, then dig into any area.
         </p>
+
+        {/* Save / create-account CTA — only for anonymous, unclaimed sessions */}
+        {justSaved ? (
+          <div style={{
+            background: '#101410', border: '1px solid #1A2A1A', borderRadius: 10,
+            padding: '16px 20px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ color: '#6AA36A', fontFamily: 'monospace', fontSize: 13 }}>✓ Saved.</span>
+            <span style={{ color: '#807850', fontFamily: 'monospace', fontSize: 13 }}>This report is now linked to your account — you can come back to it anytime.</span>
+          </div>
+        ) : !claimed && (
+          <div style={{
+            background: '#12110C', border: '1px solid #2A2418', borderRadius: 10,
+            padding: '20px 22px', marginBottom: 24,
+          }}>
+            <div style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace', marginBottom: 8 }}>SAVE YOUR REPORT</div>
+            <div style={{ fontSize: 17, color: '#D0C8B8', marginBottom: 6 }}>
+              {authMode === 'signup' ? 'Create a free account to keep this report' : 'Sign in to save this report'}
+            </div>
+            <p style={{ fontSize: 13, lineHeight: 1.6, color: '#706850', fontFamily: 'monospace', margin: '0 0 14px', maxWidth: 520 }}>
+              Right now this report only lives in this browser. {authMode === 'signup' ? 'Create an account' : 'Sign in'} to come back to it from any device.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <input
+                placeholder="Email" type="email" value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '9px 12px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 13, minWidth: 180, flex: 1 }}
+              />
+              <input
+                placeholder="Password" type="password" value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSave()}
+                style={{ background: '#0C0C09', border: '1px solid #2A2A1E', borderRadius: 6, padding: '9px 12px', color: '#D0C8B8', fontFamily: 'monospace', fontSize: 13, minWidth: 160, flex: 1 }}
+              />
+              <button
+                onClick={handleSave} disabled={authLoading}
+                style={{ background: 'transparent', border: '1px solid #C8A96E', borderRadius: 6, padding: '9px 16px', color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, cursor: authLoading ? 'default' : 'pointer', letterSpacing: '0.04em', whiteSpace: 'nowrap', opacity: authLoading ? 0.6 : 1 }}
+              >
+                {authLoading ? 'Saving…' : authMode === 'signup' ? 'Save report →' : 'Sign in →'}
+              </button>
+            </div>
+            {authError && <div style={{ color: '#E07B5A', fontFamily: 'monospace', fontSize: 12, marginTop: 10 }}>{authError}</div>}
+            <button
+              onClick={() => { setAuthMode(authMode === 'signup' ? 'signin' : 'signup'); setAuthError('') }}
+              style={{ background: 'none', border: 'none', color: '#6A6450', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer', marginTop: 12, padding: 0, textDecoration: 'underline' }}
+            >
+              {authMode === 'signup' ? 'Already have an account? Sign in' : 'New here? Create an account'}
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
           {modules.map(m => (
