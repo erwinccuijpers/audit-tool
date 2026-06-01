@@ -411,12 +411,16 @@ function FunnelView({ sessions }: { sessions: Session[] }) {
   const authenticated = sessions.filter(s => s.user_id != null).length
   const anonymous = sessions.filter(s => s.user_id == null).length
 
-  // Cost overview (only sessions that have stored token usage)
+  // Cost overview — segmented by completed vs in-progress/churned.
+  // Cost is now persisted incrementally per turn, so unfinished sessions carry spend too.
   const totalCost = sessions.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
   const completedWithCost = sessions.filter(s => isCompleted(s) && s.cost_usd != null)
-  const avgCompletedCost = completedWithCost.length > 0
-    ? completedWithCost.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0) / completedWithCost.length
-    : 0
+  const completedCost = completedWithCost.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
+  const avgCompletedCost = completedWithCost.length > 0 ? completedCost / completedWithCost.length : 0
+  // Churned = unfinished but already cost something (a real lead with partial data → follow-up candidate)
+  const churnedWithCost = sessions.filter(s => !isCompleted(s) && (s.cost_usd ?? 0) > 0)
+  const churnedCost = churnedWithCost.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
+  const avgChurnedCost = churnedWithCost.length > 0 ? churnedCost / churnedWithCost.length : 0
 
   // Drop-off distribution: bucket current_q_index into ranges
   const buckets = [
@@ -475,6 +479,27 @@ function FunnelView({ sessions }: { sessions: Session[] }) {
             <div style={{ ...label(), fontSize: 9 }}>{lbl}</div>
           </div>
         ))}
+      </div>
+
+      {/* Cost breakdown — completed vs churned spend */}
+      <div style={card()}>
+        <SectionLabel>COST BREAKDOWN</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 4 }}>
+          {[
+            { lbl: 'TOTAL SPEND', val: `$${totalCost.toFixed(2)}`, sub: `${completedWithCost.length + churnedWithCost.length} sessions w/ cost`, accent: '#C8A96E' },
+            { lbl: 'COMPLETED', val: `$${completedCost.toFixed(2)}`, sub: `${completedWithCost.length} · avg $${avgCompletedCost.toFixed(2)}`, accent: '#7AAA7A' },
+            { lbl: 'CHURNED (LEADS)', val: `$${churnedCost.toFixed(2)}`, sub: `${churnedWithCost.length} · avg $${avgChurnedCost.toFixed(2)}`, accent: '#E0905A' },
+          ].map(c => (
+            <div key={c.lbl} style={{ background: '#0C0C09', border: '1px solid #1A1A14', borderRadius: 6, padding: '12px 14px' }}>
+              <div style={{ color: c.accent, fontFamily: 'monospace', fontSize: 20, fontWeight: 300 }}>{c.val}</div>
+              <div style={{ ...label(), fontSize: 9, marginTop: 4 }}>{c.lbl}</div>
+              <div style={{ ...mono, fontSize: 9, color: '#3A3A28', marginTop: 4 }}>{c.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ ...mono, fontSize: 9, color: '#2A2A20', marginTop: 10 }}>
+          Churned = unfinished sessions that already incurred cost — partial data captured, worth a follow-up.
+        </div>
       </div>
 
       {/* Conversion funnel */}

@@ -173,6 +173,19 @@ export default function InterviewPage() {
     tokenTotals.current.output += usage.output_tokens ?? 0
   }
 
+  // How much usage has already been written to the DB this page-load. Lets us
+  // persist cost incrementally (the delta) after every turn instead of one lump
+  // at completion — so abandoned/in-progress sessions still carry their cost-so-far.
+  const persistedTokens = useRef({ input: 0, output: 0 })
+  async function flushUsage(id: string | null = sessionId) {
+    if (!id) return
+    const dIn = tokenTotals.current.input - persistedTokens.current.input
+    const dOut = tokenTotals.current.output - persistedTokens.current.output
+    if (dIn <= 0 && dOut <= 0) return
+    persistedTokens.current = { input: tokenTotals.current.input, output: tokenTotals.current.output }
+    await addSessionUsage(id, { input_tokens: dIn, output_tokens: dOut })
+  }
+
   // auth state
   const [user, setUser] = useState<any>(null)
   const [resumableSession, setResumableSession] = useState<any>(null)
@@ -360,6 +373,7 @@ export default function InterviewPage() {
     setOverlayMode('signup')
     setInput('')
     tokenTotals.current = { input: 0, output: 0 }
+    persistedTokens.current = { input: 0, output: 0 }
     claudeResponsesRef.current = 0
     const { data } = await supabase
       .from('sessions')
@@ -623,6 +637,8 @@ export default function InterviewPage() {
       if (!res.ok) throw new Error('pillar API error')
       const data = await res.json()
       trackUsage(data.usage)
+      // Persist cost-so-far after every turn (captures churned sessions too)
+      await flushUsage()
 
       if (data.pillarComplete) {
         await closePillar(pillarName, newConv, data.dataBacked)
@@ -666,6 +682,7 @@ export default function InterviewPage() {
       })
       sd = await r.json()
       trackUsage(sd.usage)
+      await flushUsage()
     } catch {
       sd = { contextSummary: `${pillarName} covered.`, entities: { tools: [], numbers: [], competitors: [], flags: [] }, confidence: 50, situation: '', recommendation: '', dataGaps: [] }
     }
@@ -704,9 +721,9 @@ export default function InterviewPage() {
     const nextIndex = currentPillarIndex + 1
     if (nextIndex >= PILLAR_ORDER.length) {
       await supabase.from('sessions').update({ status: 'interview_done' }).eq('id', sessionId)
-      // Persist the interview-phase token usage for cost tracking (report tokens
-      // are added separately when the report generates).
-      await addSessionUsage(sessionId, { input_tokens: tokenTotals.current.input, output_tokens: tokenTotals.current.output })
+      // Cost is now persisted incrementally per turn via flushUsage(); this catches
+      // any final delta. (Report tokens are added separately when the report generates.)
+      await flushUsage()
       setPhase('referral')
     } else {
       const key = `${pillarName}→${PILLAR_ORDER[nextIndex]}`
@@ -993,6 +1010,7 @@ export default function InterviewPage() {
       isComplete = data.isComplete
       dataBacked = data.dataBacked ?? null
       trackUsage(data.usage)
+      await flushUsage()
     } catch {
       setAiError(true)
       setLoading(false)
@@ -1282,7 +1300,7 @@ export default function InterviewPage() {
       await saveResponse(currentQ.id, conversation)
       if (qIndex + 1 >= questions.length) {
         await supabase.from('sessions').update({ status: 'interview_done' }).eq('id', sessionId)
-        await addSessionUsage(sessionId, { input_tokens: tokenTotals.current.input, output_tokens: tokenTotals.current.output })
+        await flushUsage()
         setConversation(prev => [...prev, { role: 'assistant', content: "That's everything — thank you. Building your report now..." }])
         setPhase('done')
         setTimeout(() => { window.location.href = `/hub?session=${sessionId}` }, 2000)
