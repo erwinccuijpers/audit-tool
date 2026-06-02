@@ -47,17 +47,44 @@ export async function POST(req: NextRequest) {
 
   const lang = language || 'English'
 
-  // Solo owners (no staff) get the People section reframed around owner-dependency
-  // and continuity instead of team/staff churn questions that assume employees.
-  const isSolo = businessProfile?.has_employees === false
+  // Staff status is tri-state: true (has staff), false (explicitly solo), or
+  // unknown (null/undefined — never assume from business type). The People
+  // section adapts to whichever is known; if unknown, it establishes it first
+  // rather than assuming "it's just you".
+  const staffStatus = businessProfile?.has_employees
+  const isSolo = staffStatus === false
+  const staffUnknown = staffStatus !== true && staffStatus !== false
+
   const pillarFocus = (pillarName === 'people' && isSolo)
     ? 'owner dependency and business continuity: what happens if the owner cannot work for a stretch, whether anyone could step in, what they would hand off or delegate first if they could afford help, and how much of the business exists only in the owner\'s head'
     : (PILLAR_FOCUS[pillarName] || pillarName)
 
-  const soloPeopleGuard = (pillarName === 'people' && isSolo)
-    ? `\n\nIMPORTANT — THIS OWNER RUNS THE BUSINESS SOLO (no employees):
+  let soloPeopleGuard = ''
+  if (pillarName === 'people' && isSolo) {
+    soloPeopleGuard = `\n\nIMPORTANT — THIS OWNER RUNS THE BUSINESS SOLO (no employees):
 Do NOT ask about staff retention, team churn, hiring, who might leave, or workplace culture — they have no team. Instead explore owner-dependency and continuity: what happens if they're out for two weeks, whether anyone (family, a freelancer, a peer) could cover, the single task they'd most want to offload to a cheap hire, and what only exists in their head.`
+  } else if (pillarName === 'people' && staffUnknown) {
+    soloPeopleGuard = `\n\nIMPORTANT — YOU DO NOT YET KNOW IF THIS OWNER HAS STAFF:
+Open by establishing it, naturally: "Before we get into this — is it just you running things, or do you have people working with you?" Do NOT assume "it's just you." Then adapt: if they have a team, explore stability, delegation, and key-person risk; if it's just them, pivot to owner-dependency and continuity (what happens if they're out, who could cover, what only lives in their head).`
+  }
+
+  // Facts already established in earlier sections — surfaced prominently so the
+  // consultant never re-asks a number the owner already gave (a top friction
+  // point: "like I said already"). Built from prior pillars' extracted entities.
+  const establishedNumbers = Array.from(new Set(
+    Object.values(previousPillarSummaries).flatMap(s => s.entities?.numbers || [])
+  ))
+  const establishedTools = Array.from(new Set(
+    Object.values(previousPillarSummaries).flatMap(s => s.entities?.tools || [])
+  ))
+  const staffLine = staffStatus === true ? 'The owner HAS staff/employees.'
+    : staffStatus === false ? 'The owner runs the business SOLO (no staff).'
     : ''
+  const establishedFacts = [
+    staffLine,
+    establishedNumbers.length ? `Numbers already given (do NOT ask for these again): ${establishedNumbers.join('; ')}` : '',
+    establishedTools.length ? `Tools already named: ${establishedTools.join(', ')}` : '',
+  ].filter(Boolean).join('\n')
 
   // Build previous pillar context block (compact — just summaries + key entities)
   const prevContext = Object.entries(previousPillarSummaries)
@@ -92,6 +119,7 @@ Owner tone: ${businessProfile.owner_tone || 'unknown'}${typeGuidance ? `\nFramin
 ${profileBlock}
 
 ${prevContext ? `WHAT YOU ALREADY KNOW FROM EARLIER SECTIONS:\n${prevContext}` : 'This is the first section.'}
+${establishedFacts ? `\nALREADY ESTABLISHED — DO NOT RE-ASK:\n${establishedFacts}` : ''}
 
 YOUR MISSION FOR THIS SECTION — ${pillarLabel.toUpperCase()}:
 Get enough data to write a genuinely useful diagnostic for: ${pillarFocus}${soloPeopleGuard}
@@ -107,6 +135,14 @@ HOW TO WORK:
 - If something from an earlier section is directly relevant here, connect it — "you mentioned earlier that you use Lightspeed, does that mean you can see..."
 - Probe for specifics: tools named, numbers cited, direct experience vs gut feel.
 - Match the owner's energy. If they're brief, be efficient. If they're expansive, follow the thread.
+- NEVER re-ask a fact listed under "ALREADY ESTABLISHED" above. If you need to reference it, state it back ("you mentioned €20/week earlier…") rather than asking for it again.
+- WATCH FOR CONTRADICTIONS: if something the owner says now conflicts with an earlier fact, don't silently overwrite it — surface it: "Earlier you mentioned X, now it sounds like Y — can I assume Z?"
+
+CAPTURE THE *REASON* BEHIND INACTION (important):
+When the owner is clearly aware of something but hasn't acted on it (e.g. you ask "have you tried / set up / measured X?" and they say "no"), don't just move on. Ask ONE light follow-up to learn WHY they haven't:
+- Is it that they didn't know it mattered / haven't gotten to it? Or
+- Is it a deliberate choice because something else is the bigger priority right now (a bottleneck, a project, a constraint)?
+This distinction is gold for the diagnostic: a deliberate deprioritisation ("we paused referrals because the warehouse/storage bottleneck was hurting growth more") tells us whether to validate their sequencing or advise them to switch focus. Most owners won't volunteer this reason because it doesn't feel noteworthy to them — so ask. Keep it to one warm question, then move on.
 
 ALWAYS WATCH FOR TECH:
 If there's any gap in data, tracking, or visibility — ask what tools they use. If they name a tool, probe whether they actually use the data it produces.

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
@@ -93,6 +94,23 @@ export async function POST(req: NextRequest) {
 
   if (adminEmail !== ADMIN_EMAIL) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // ── SET_TEST: move a session between the Real and Demo buckets ────────────
+  // Demo = is_test true (also set via ?test=1). Flipping it moves the whole
+  // client at once: responses, leads, feedback are all keyed by session_id, so
+  // they follow the session into the other bucket. Service-role write (RLS).
+  if (action === 'set_test') {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { error } = await supabase
+      .from('sessions')
+      .update({ is_test: !!body.isTest })
+      .eq('id', sessionId)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, isTest: !!body.isTest })
   }
 
   // ── PATTERNS: aggregate analysis across all clients ──────────────────────

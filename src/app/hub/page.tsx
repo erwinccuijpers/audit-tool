@@ -75,6 +75,22 @@ function HubContent() {
     load()
   }, [sessionId])
 
+  // Deep-link from the hamburger menu: ?panel=briefing|suggestion|workplan acts
+  // once the hub has loaded, then the param is cleared. Clearing matters — without
+  // it, re-clicking the same menu item pushes an unchanged URL, so the effect
+  // wouldn't re-fire and the panel wouldn't re-open after being closed.
+  useEffect(() => {
+    if (loading) return
+    const panel = searchParams.get('panel')
+    if (!panel) return
+    if (panel === 'briefing') setShowEmail0(true)
+    else if (panel === 'suggestion') setShowSuggestion(true)
+    else if (panel === 'workplan') {
+      setTimeout(() => document.getElementById('workplan-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)
+    }
+    router.replace(`/hub?session=${sessionId}`, { scroll: false })
+  }, [loading, searchParams, sessionId, router])
+
   async function load() {
     const { data: session } = await supabase
       .from('sessions')
@@ -188,12 +204,47 @@ function HubContent() {
   }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-      <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13 }}>
-        {building ? 'Analyzing your answers…' : 'Loading…'}
-      </span>
-      {building && <span style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>Setting up your dashboard</span>}
-    </div>
+    <>
+      <style>{`
+        @keyframes cmo-slide {
+          0%   { left: -45%; width: 45%; }
+          60%  { width: 45%; }
+          100% { left: 145%; width: 45%; }
+        }
+        @keyframes cmo-dot {
+          0%, 100% { opacity: 0.2; transform: scale(0.8); }
+          50%       { opacity: 1;   transform: scale(1); }
+        }
+      `}</style>
+      <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.18em', marginBottom: 28 }}>
+          {building ? 'DIAGNOSTIC REPORT' : 'POCKET CMO'}
+        </div>
+        <div style={{ width: 180, height: 2, background: '#1A1A14', borderRadius: 1, position: 'relative', overflow: 'hidden', marginBottom: 28 }}>
+          <div style={{
+            position: 'absolute', top: 0, height: '100%',
+            background: 'linear-gradient(90deg, transparent, #C8A96E, transparent)',
+            borderRadius: 1, animation: 'cmo-slide 1.8s ease-in-out infinite',
+          }} />
+        </div>
+        <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.04em', marginBottom: 16 }}>
+          {building ? 'Analyzing your answers' : 'Loading'}
+        </div>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 28 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 5, height: 5, borderRadius: '50%', background: '#4A4A38',
+              animation: `cmo-dot 1.4s ease-in-out ${i * 0.22}s infinite`,
+            }} />
+          ))}
+        </div>
+        {building && (
+          <div style={{ color: '#2A2A1E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
+            Building your dashboard — this takes a few seconds…
+          </div>
+        )}
+      </div>
+    </>
   )
   if (error) return (
     <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -434,10 +485,10 @@ function HubContent() {
           {/* Personalized briefing (newsletter) */}
           <div style={{ background: '#111110', border: '1px solid #1E1E14', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>PERSONALIZED BRIEFING</span>
+              <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#C8A96E', fontFamily: 'monospace' }}>PERSONALIZED NEWSLETTER</span>
               <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
             </div>
-            <div style={{ fontSize: 17, color: '#D0C8B8' }}>Customized emails, matched to you</div>
+            <div style={{ fontSize: 17, color: '#D0C8B8' }}>Custom actionable-insights newsletter</div>
             <p style={{ fontSize: 12.5, lineHeight: 1.6, color: '#807850', fontFamily: 'monospace', margin: 0, flex: 1 }}>
               Every email a new, usable lesson — drawn from real cases that fit your business. Not a generic newsletter.
             </p>
@@ -449,7 +500,7 @@ function HubContent() {
           </div>
 
           {/* Work your plan */}
-          <div style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div id="workplan-card" style={{ background: '#111110', border: '1px solid #161612', borderRadius: 10, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 9, scrollMarginTop: 80 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 9, letterSpacing: '0.14em', color: '#9A8A6A', fontFamily: 'monospace' }}>WORK YOUR PLAN</span>
               <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4A4A38', border: '1px solid #2A2A1E', borderRadius: 3, padding: '1px 6px' }}>In development</span>
@@ -482,7 +533,7 @@ function HubContent() {
 
       {/* Full-screen email0 example */}
       {showEmail0 && (
-        <FullScreenPanel title="YOUR FIRST EMAIL — EXAMPLE" onClose={() => setShowEmail0(false)}>
+        <FullScreenPanel title="PERSONALIZED NEWSLETTER — EXAMPLE" onClose={() => setShowEmail0(false)}>
           {email0Loading && !email0 && <p style={{ fontSize: 14, fontFamily: 'monospace', color: '#5A5440' }}>Writing your example…</p>}
           {email0 && (
             <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: 10, padding: '22px 24px', marginBottom: 18 }}>

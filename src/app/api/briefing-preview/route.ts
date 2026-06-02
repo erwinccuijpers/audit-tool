@@ -10,17 +10,64 @@ const PILLAR_KEYS = ['positioning', 'acquisition', 'retention', 'revenue', 'stra
 
 // sessions.scores uses the report's display labels, not pillar keys — map them back.
 const SCORE_LABEL_TO_PILLAR: Record<string, string> = {
+  // Current 7-pillar report labels
+  'Positioning': 'positioning',
+  'Acquisition': 'acquisition',
+  'Retention': 'retention',
+  'Revenue': 'revenue',
+  'Strategy': 'strategy',
+  'Tools & Systems': 'tools',
+  'People': 'people',
+  // Legacy pre-consolidation labels (older sessions)
   'Client Acquisition': 'acquisition',
   'Marketing & Visibility': 'acquisition',
   'Revenue Optimization': 'revenue',
   'Client Retention': 'retention',
-  'Tools & Systems': 'tools',
   'Competitive Position': 'positioning',
 }
 
 const PILLAR_LABEL: Record<string, string> = {
   positioning: 'Positioning', acquisition: 'Acquisition', retention: 'Retention',
   revenue: 'Revenue', strategy: 'Strategy', tools: 'Tools & Systems', people: 'People',
+}
+
+const CLAUDE_URL = 'https://claude.ai'
+
+// Documentation roots for tools owners commonly name. Keyed by a lowercase
+// substring matched against the tools surfaced in the interview, so the email
+// can point at REAL sources instead of vague "pull some reports".
+const TOOL_DOCS: { match: string; name: string; url: string }[] = [
+  { match: 'lightspeed', name: 'Lightspeed', url: 'https://retail-support.lightspeedhq.com/hc/en-us' },
+  { match: 'shopify', name: 'Shopify', url: 'https://help.shopify.com/en/manual/reports-and-analytics' },
+  { match: 'google analytics', name: 'Google Analytics', url: 'https://support.google.com/analytics' },
+  { match: 'analytics', name: 'Google Analytics', url: 'https://support.google.com/analytics' },
+  { match: 'google ads', name: 'Google Ads', url: 'https://support.google.com/google-ads' },
+  { match: 'exact', name: 'Exact Online', url: 'https://support.exactonline.com' },
+  { match: 'klarna', name: 'Klarna', url: 'https://www.klarna.com/business/' },
+  { match: 'zettle', name: 'Zettle', url: 'https://www.zettle.com/help' },
+  { match: 'woocommerce', name: 'WooCommerce', url: 'https://woocommerce.com/documentation/' },
+  { match: 'quickbooks', name: 'QuickBooks', url: 'https://quickbooks.intuit.com/learn-support/' },
+  { match: 'hubspot', name: 'HubSpot', url: 'https://knowledge.hubspot.com' },
+  { match: 'mailchimp', name: 'Mailchimp', url: 'https://mailchimp.com/help/' },
+  { match: 'klaviyo', name: 'Klaviyo', url: 'https://help.klaviyo.com' },
+  { match: 'square', name: 'Square', url: 'https://squareup.com/help' },
+  { match: 'stripe', name: 'Stripe', url: 'https://support.stripe.com' },
+]
+
+// Collect the distinct tools the owner actually named across all pillars, and
+// resolve any that match a known documentation source.
+function gatherTools(pillars: Record<string, any>): { names: string[]; docs: { name: string; url: string }[] } {
+  const names = Array.from(new Set(
+    Object.values(pillars || {}).flatMap((p: any) => p?.entities?.tools || [])
+  )) as string[]
+  const docs: { name: string; url: string }[] = []
+  const seen = new Set<string>()
+  for (const t of names) {
+    const lc = t.toLowerCase()
+    const hit = TOOL_DOCS.find(d => lc.includes(d.match))
+    if (hit && !seen.has(hit.name)) { docs.push({ name: hit.name, url: hit.url }); seen.add(hit.name) }
+  }
+  return { names, docs }
 }
 
 // Pick the weakest covered pillar: lowest mapped report score, else lowest pillar confidence.
@@ -116,6 +163,13 @@ export async function POST(req: NextRequest) {
 
   // 5) Render email0 in the EMAIL-PLAYBOOK voice, in the client's language
   const p = pillars[weakest] || {}
+  const { names: toolNames, docs: toolDocs } = gatherTools(pillars)
+  const toolsBlock = toolDocs.length
+    ? toolDocs.map(d => `- ${d.name}: ${d.url}`).join('\n')
+    : ''
+  const toolsLine = toolNames.length
+    ? `Tools this owner actually uses: ${toolNames.join(', ')}.`
+    : 'No specific tools were named — keep the sources generic (their POS / analytics / spreadsheet).'
   const provLine = picked.provenance === 'first_party'
     ? 'This is a business you worked with directly — tell it that way ("a shop I worked with…", "I once consulted for…").'
     : picked.provenance === 'second_hand'
@@ -130,7 +184,11 @@ ${session.business_description ? `What they do: ${session.business_description}`
 THE AREA THIS TASTER FOCUSES ON: ${PILLAR_LABEL[weakest]} (their biggest current gap)
 Their situation here: ${p.situation || p.contextSummary || 'limited data'}
 Our recommendation seed: ${p.recommendation || ''}
-Open data gaps: ${(p.dataGaps || []).join('; ') || 'none noted'}
+Open data gaps (these are the things they should go pull/measure): ${(p.dataGaps || []).join('; ') || 'none noted'}
+
+${toolsLine}
+${toolsBlock ? `Real documentation links you may cite (only for tools they actually use):\n${toolsBlock}` : ''}
+Claude (for the "drop your data in and ask" step): ${CLAUDE_URL}
 
 THE STORY TO BUILD FROM (${picked.external_ref}, provenance=${picked.provenance}):
 Pattern: ${picked.pattern_name}
@@ -141,23 +199,27 @@ Example applications: ${picked.example_applications || ''}
 ${angle ? `Best angle for this area — ${angle.title}: ${angle.angle_text || angle.insight || ''}` : ''}
 PROVENANCE VOICE: ${provLine}
 
-HOW TO WRITE IT (house style):
+HOW TO WRITE IT (house style — a consultant sharing inspiration, then making it tangible):
 - Lead with what this owner actually wants / their situation — not "your lowest score".
-- ONE story, three parts: (a) the narrative told to a friend; (b) the transferable principle in one line; (c) a CONCRETE play for THIS owner with real first steps — name the actual move, not "you could…".
-- Push the play one level deeper than the obvious.
-- At most one or two numbers. No jargon. Warm, sharp, like a smart friend who runs businesses.
-- Analyze, don't fully implement — name the leak, give the first step, then stop (the full plan is the paid upsell).
-- Close with ONE low-friction next step.
-- Keep it tight: ~180–260 words of body.
+- ONE story, told like you would to a friend: (a) the narrative; (b) the transferable principle in one line; (c) the CONCRETE play for THIS owner — name the actual move, not "you could…". Push it one level past the obvious.
+- THEN a tangible "This week, try this" block that turns the play into something they can do with tools they already have. Make it a guided, source-filled path, e.g.:
+  · "This week, try pulling reports like [name 2-3 SPECIFIC reports/metrics tied to the open data gaps above] in [their actual tool] ([cite the real doc link from the list when one exists])."
+  · "Export them as CSV and either eyeball them in Google Sheets, or open a new chat in Claude (${CLAUDE_URL}) and paste something like: 'Scan these for [the specific topics: X, Y, Z]. If the data is there, walk me through ways to visualise it and use it to test a new idea.'"
+  · Only cite a documentation link for a tool they ACTUALLY use (from the list above). If none is known, keep the source generic ("your POS / analytics export") but still give the Claude step.
+  · Frame it as validating whether the data even exists — that's the point of the exercise.
+- This is the difference between "pull some reports and use AI" (vague) and a tangible, do-it-this-week path. Be specific and real.
+- At most one or two numbers in the story part. No jargon. Warm, sharp, like a smart operator who's been there.
+- Analyze, don't fully implement — name the leak, give the tangible first move, then stop. The full build / done-for-you is the paid upsell, so end with a soft line inviting them to reply if they'd rather have help or hand it off.
+- Keep it tight: ~220–320 words of body (the sources block earns the extra length).
 
-LANGUAGE: Write subject and body in ${lang}. Return ONLY valid JSON, no markdown fences:
+LANGUAGE: Write subject and body in ${lang} (keep URLs and tool names as-is). Return ONLY valid JSON, no markdown fences:
 {"subject": "...", "body": "...", "area": "${PILLAR_LABEL[weakest]}"}`
 
   let parsed: any = null
   try {
     const resp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1200,
+      max_tokens: 1600,
       messages: [{ role: 'user', content: prompt }],
     })
     const raw = resp.content[0].type === 'text' ? resp.content[0].text.trim() : '{}'

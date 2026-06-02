@@ -27,7 +27,9 @@ body {
 
 /* Layout safety: padding never expands element width; no accidental horizontal scroll. */
 *, *::before, *::after { box-sizing: border-box; }
-html, body { max-width: 100%; overflow-x: hidden; }
+/* overflow-x: clip (not hidden) prevents horizontal scroll WITHOUT establishing a
+   scroll container — which is what lets `position: sticky` headers keep working. */
+html, body { max-width: 100%; overflow-x: clip; }
 
 /* iOS Safari zooms in when focusing an input whose font-size is < 16px, which then
    pushes fields off-screen. Force 16px on form controls on small screens to stop it. */

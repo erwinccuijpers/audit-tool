@@ -9,6 +9,14 @@ export async function POST(req: NextRequest) {
   const { businessName, responses, language } = await req.json()
   const lang = language || 'English'
 
+  // Categories must match the 7-pillar interview structure (see PILLAR_LABELS in
+  // page.tsx). All 7 are always covered in the interview — solo owners still get
+  // the People section, reframed as owner-dependency / key-person risk — so the
+  // report always scores all 7.
+  const alwaysInclude = [
+    'Positioning', 'Acquisition', 'Retention', 'Revenue', 'Strategy', 'Tools & Systems', 'People',
+  ]
+
   const transcript = responses.map((r: any) => {
     const messages = r.conversation
       .map((m: any) => `${m.role === 'user' ? 'Owner' : 'Interviewer'}: ${m.content}`)
@@ -62,7 +70,9 @@ Based on this, produce a diagnostic report as a JSON object with exactly this st
 
 For firmographics, infer conservatively from everything the owner said (staff mentioned, transaction values, customer counts, founding year, location). Use the bands; do not invent precise figures. If a value genuinely can't be estimated, use null (or "unknown" for revenue_band).
 
-Categories to always include: Client Acquisition, Revenue Optimization, Client Retention, Marketing & Visibility, Tools & Systems, Competitive Position
+Categories to always include: ${alwaysInclude.join(', ')}
+
+For "People": if the business has employees, assess team, culture, and delegation. If it's a solo owner, assess owner-dependency and key-person risk instead (what happens if the owner can't work) — still score it.
 
 Score honestly — do not inflate scores. If something was not discussed or the owner didn't know the answer, score it 2.
 

@@ -62,8 +62,9 @@ Generate a structured assessment of this section. Return ONLY valid JSON with ex
     "tools": ["any software, app, platform, or tool mentioned by name"],
     "numbers": ["any specific figures cited: revenue, client count, percentages, prices, etc."],
     "competitors": ["any named competitors or comparable businesses mentioned"],
-    "flags": ["key observations worth tracking: gaps, risks, surprises, or things that need follow-up — in plain language"]
+    "flags": ["key observations worth tracking: gaps, risks, surprises, or things that need follow-up — in plain language. IMPORTANT: when the owner is aware of something but deliberately hasn't acted on it, capture BOTH the inaction AND their stated reason, e.g. 'Paused referral/retention work — deliberate, because fixing the warehouse storage bottleneck is the current priority'. This tells us whether their sequencing is sound."]
   },
+  "staffSignal": "one of: has_staff / solo / unknown — set 'has_staff' ONLY if this conversation explicitly indicates employees/team/co-workers; 'solo' ONLY if it explicitly indicates they run it alone; otherwise 'unknown'. Do not infer from business type.",
   "confidence": 72,
   "situation": "2-3 sentences on the current state of this area. Honest — if data is thin, say so. Written for the business owner to read.",
   "recommendation": "One concrete, specific first angle or action for this business. Not generic advice — something grounded in what they actually told you.",

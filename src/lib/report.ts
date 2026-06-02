@@ -7,6 +7,10 @@ export type BigBet = { title: string; desc: string; mvp: string }
 export type Report = { summary: string; areas: AreaScore[]; quickWins: QuickWin[]; bigBets: BigBet[] }
 
 const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+const PILLAR_LABELS: Record<string, string> = {
+  positioning: 'Positioning', acquisition: 'Acquisition', retention: 'Retention',
+  revenue: 'Revenue', strategy: 'Strategy', tools: 'Tools & Systems', people: 'People',
+}
 
 type EnsureResult =
   | { report: Report; businessName: string; error?: undefined }
@@ -33,44 +37,61 @@ export async function ensureReport(sessionId: string, opts: { force?: boolean } 
     return { report: session.report as Report, businessName }
   }
 
-  // Build the interview transcript the report route expects
-  let formatted: { question: string; conversation: any[] }[] = []
+  const isV2 = session.dashboard_cache?.v === 2
+  let generated: any
+  let genUsage: any
+  let refreshedPillars: Record<string, any> | null = null
 
-  if (session.dashboard_cache?.v === 2) {
-    const pillars: Record<string, any> = session.dashboard_cache?.pillars || {}
-    formatted = PILLAR_ORDER
-      .filter(p => pillars[p])
+  if (isV2) {
+    // Pillar sessions: run the full-transcript synthesis — one authoritative pass
+    // that produces the report AND a fresh deep-dive for every pillar (cross-aware,
+    // and immune to the incremental summaries' silent stub fallback).
+    const pillarsObj: Record<string, any> = session.dashboard_cache?.pillars || {}
+    const pillarInputs = PILLAR_ORDER
+      .filter(p => pillarsObj[p])
       .map(p => ({
-        question: p.charAt(0).toUpperCase() + p.slice(1),
-        conversation: pillars[p].conversation || [
-          { role: 'assistant', content: pillars[p].contextSummary || '' },
+        name: p,
+        label: PILLAR_LABELS[p] || p,
+        conversation: pillarsObj[p].conversation || [
+          { role: 'assistant', content: pillarsObj[p].contextSummary || '' },
         ],
       }))
+    if (pillarInputs.length === 0) return { error: 'No interview data found for this session.' }
+
+    const res = await fetch('/api/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ businessName, pillars: pillarInputs, language: session.language || 'English', hasEmployees: session.has_employees }),
+    })
+    const data = await res.json()
+    if (data.error || !data.report) return { error: 'Failed to generate report.' }
+    generated = data.report
+    genUsage = data.usage
+    refreshedPillars = data.pillars || null
   } else {
+    // Legacy (pre-pillar) sessions: original per-response report path.
     const { data: responses } = await supabase
       .from('responses')
       .select('*, questions(core_question)')
       .eq('session_id', sessionId)
     if (!responses || responses.length === 0) return { error: 'No responses found for this session.' }
-    formatted = responses.map((r: any) => ({
+    const formatted = responses.map((r: any) => ({
       question: r.questions?.core_question || 'Unknown question',
       conversation: r.conversation || [],
     }))
+    const res = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ businessName, responses: formatted, language: session.language || 'English' }),
+    })
+    const reportData = await res.json()
+    if (reportData.error || !reportData.report) return { error: 'Failed to generate report.' }
+    generated = reportData.report
+    genUsage = reportData.usage
   }
 
-  if (formatted.length === 0) return { error: 'No interview data found for this session.' }
-
-  const res = await fetch('/api/report', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ businessName, responses: formatted, language: session.language || 'English' }),
-  })
-  const reportData = await res.json()
-  const { report: generated, error: apiError } = reportData
-  if (apiError || !generated) return { error: 'Failed to generate report.' }
-
-  // Fold the report call's tokens into the session's cost total
-  await addSessionUsage(sessionId, reportData.usage)
+  // Fold the generation call's tokens into the session's cost total
+  await addSessionUsage(sessionId, genUsage)
 
   // Persist report + scores + status so revisits serve the stored version.
   // Also persist firmographics (benchmark fields) extracted from the full
@@ -87,12 +108,33 @@ export async function ensureReport(sessionId: string, opts: { force?: boolean } 
   if (typeof f.years_in_business === 'number') firmoPatch.years_in_business = f.years_in_business
   if (f.region != null) firmoPatch.region = f.region
 
-  await supabase.from('sessions').update({
+  // For v2 sessions, fold the synthesis' refreshed pillar deep-dives back into
+  // dashboard_cache, overwriting the incremental (possibly stubbed) situation /
+  // recommendation / entities while preserving the raw conversation + metadata.
+  const updatePatch: Record<string, any> = {
     status: 'completed',
     scores: Object.keys(scoreMap).length > 0 ? scoreMap : null,
     report: generated,
     ...firmoPatch,
-  }).eq('id', sessionId)
+  }
+  if (isV2 && refreshedPillars && Object.keys(refreshedPillars).length > 0) {
+    const pillarsObj: Record<string, any> = { ...(session.dashboard_cache?.pillars || {}) }
+    for (const [name, d] of Object.entries(refreshedPillars)) {
+      if (!pillarsObj[name]) continue
+      const rd = d as any
+      pillarsObj[name] = {
+        ...pillarsObj[name],
+        situation: rd.situation ?? pillarsObj[name].situation,
+        recommendation: rd.recommendation ?? pillarsObj[name].recommendation,
+        confidence: typeof rd.confidence === 'number' ? rd.confidence : pillarsObj[name].confidence,
+        entities: rd.entities ?? pillarsObj[name].entities,
+        dataGaps: rd.dataGaps ?? pillarsObj[name].dataGaps,
+      }
+    }
+    updatePatch.dashboard_cache = { v: 2, pillars: pillarsObj }
+  }
+
+  await supabase.from('sessions').update(updatePatch).eq('id', sessionId)
 
   // Fire pattern-match in background — updates admin pattern slots, non-blocking
   fetch('/api/pattern-match', {

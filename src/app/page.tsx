@@ -387,10 +387,47 @@ export default function InterviewPage() {
       setSessionId(data.id)
       sessionStorage.setItem('audit_session_id', data.id)
       setPhase('intro')
-      const opener: Message = { role: 'assistant', content: INTRO_OPENER }
+      const [openerText] = await localize([INTRO_OPENER])
+      const opener: Message = { role: 'assistant', content: openerText }
       setIntroConversation([opener])
       setConversation([opener])
     }
+  }
+
+  // Localize the interview's fixed English scaffolding (openers, transitions,
+  // pillar questions, welcome lines) into the owner's language, so the tool
+  // speaks one consistent language. No-op for English. Cached per language+string
+  // in sessionStorage so repeated strings aren't re-translated. langOverride is
+  // used on resume, where the language state hasn't propagated to effectiveLanguage yet.
+  async function localize(texts: string[], langOverride?: string): Promise<string[]> {
+    const target = (langOverride || effectiveLanguage || 'English')
+    if (/^english$/i.test(target)) return texts
+    const key = (t: string) => `cmoTr|${target}|${t}`
+    const out: (string | null)[] = texts.map(t => { try { return sessionStorage.getItem(key(t)) } catch { return null } })
+    const missing = out.map((v, i) => (v == null ? i : -1)).filter(i => i >= 0)
+    if (missing.length > 0) {
+      try {
+        const res = await fetch('/api/translate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ texts: missing.map(i => texts[i]), language: target }),
+        })
+        const data = await res.json()
+        trackUsage(data.usage)
+        const tr: string[] = data.translations || []
+        missing.forEach((origIdx, k) => {
+          const val = (typeof tr[k] === 'string' && tr[k].trim()) ? tr[k] : texts[origIdx]
+          out[origIdx] = val
+          // Only cache real translations — never cache a failure fallback, or we'd
+          // freeze English in for this string for the rest of the session.
+          if (data.ok !== false && val !== texts[origIdx]) {
+            try { sessionStorage.setItem(key(texts[origIdx]), val) } catch { /* quota */ }
+          }
+        })
+      } catch {
+        missing.forEach(i => { out[i] = texts[i] })
+      }
+    }
+    return out.map((v, i) => v ?? texts[i])
   }
 
   async function classifyAndTransition(finalIntroConv: Message[]) {
@@ -487,9 +524,10 @@ export default function InterviewPage() {
         const firstQ = orderedQuestions.find(q => q.category === firstPillar)?.core_question
           || allQuestions.find(q => q.category === firstPillar)?.core_question || ''
         const intro = `Got it — that's really helpful context. ${awarenessLine}\n\nI'll take you through 7 areas of your business one by one. We'll go as deep as needed in each. Some will take a few minutes, some more. Just answer honestly — that's what makes this valuable.\n\n${firstQ}`
+        const [introLoc] = await localize([intro])
         claudeResponsesRef.current += 1
-        setInterviewTransition(intro)
-        setConversation(prev => [...prev, { role: 'assistant', content: intro }])
+        setInterviewTransition(introLoc)
+        setConversation(prev => [...prev, { role: 'assistant', content: introLoc }])
         setCurrentPillarIndex(0)
         setPhase('interview')
         return
@@ -499,9 +537,10 @@ export default function InterviewPage() {
 
     const transition = `Got it — that's really helpful context. ${awarenessLine}\n\nDepending on how complex your business is, this usually takes between 1 and 1.5 hours. Some questions will feel obvious, some might surprise you. Just answer honestly — that's what makes this useful.\n\n${orderedQuestions[0].core_question}`
 
+    const [transitionLoc] = await localize([transition])
     claudeResponsesRef.current += 1
-    setInterviewTransition(transition)
-    setConversation(prev => [...prev, { role: 'assistant', content: transition }])
+    setInterviewTransition(transitionLoc)
+    setConversation(prev => [...prev, { role: 'assistant', content: transitionLoc }])
     setPhase('interview')
   }
 
@@ -688,6 +727,18 @@ export default function InterviewPage() {
     }
     setGeneratingSummary(false)
 
+    // Resolve staff status from explicit signals as the interview progresses, so
+    // the People section and report are correct even when classify left it unknown.
+    // Only an explicit signal flips it, and only while it's still unknown.
+    let resolvedProfile = profile
+    if (profile && profile.has_employees == null && (sd.staffSignal === 'has_staff' || sd.staffSignal === 'solo')) {
+      const hasEmp = sd.staffSignal === 'has_staff'
+      resolvedProfile = { ...profile, has_employees: hasEmp }
+      setProfile(resolvedProfile)
+      profileRef.current = resolvedProfile
+      await supabase.from('sessions').update({ has_employees: hasEmp }).eq('id', sessionId)
+    }
+
     const newSummary: PillarSummary = {
       contextSummary: sd.contextSummary || '',
       entities: sd.entities || { tools: [], numbers: [], competitors: [], flags: [] },
@@ -728,13 +779,25 @@ export default function InterviewPage() {
     } else {
       const key = `${pillarName}→${PILLAR_ORDER[nextIndex]}`
       const trans = PILLAR_TRANSITIONS[key] || `Good. Let's move to ${PILLAR_LABELS[PILLAR_ORDER[nextIndex] as PillarName]}.`
-      // Solo owners get an owner-dependency opener for the People section instead
-      // of the question bank's staff/team question (which assumes employees).
-      const nextQ = (PILLAR_ORDER[nextIndex] === 'people' && profile?.has_employees === false)
-        ? "Since it's just you, let's talk about how much the business depends on you personally. If you couldn't work for two weeks, what would actually happen — could anyone step in, or would everything pause?"
-        : (allQuestions.find(q => q.category === PILLAR_ORDER[nextIndex])?.core_question || '')
+      // People opener is tri-state on staff status: explicit solo → owner-dependency;
+      // explicit staff → the team question; still unknown → establish it first
+      // rather than assuming "it's just you".
+      let nextQ: string
+      if (PILLAR_ORDER[nextIndex] === 'people') {
+        const staff = resolvedProfile?.has_employees
+        if (staff === false) {
+          nextQ = "Since it's just you, let's talk about how much the business depends on you personally. If you couldn't work for two weeks, what would actually happen — could anyone step in, or would everything pause?"
+        } else if (staff === true) {
+          nextQ = allQuestions.find(q => q.category === 'people')?.core_question || "Let's talk about your team — how stable is it, and how much of the business depends on any one person?"
+        } else {
+          nextQ = "Before we dig into this — is it just you running things, or do you have people working with you?"
+        }
+      } else {
+        nextQ = allQuestions.find(q => q.category === PILLAR_ORDER[nextIndex])?.core_question || ''
+      }
+      const [openerLoc] = await localize([`${trans}\n\n${nextQ}`])
       setCurrentPillarIndex(nextIndex)
-      setConversation([{ role: 'assistant', content: `${trans}\n\n${nextQ}` }])
+      setConversation([{ role: 'assistant', content: openerLoc }])
     }
   }
 
@@ -865,7 +928,9 @@ export default function InterviewPage() {
 
     // The question starts at the end of the welcome message array
     questionConvStartRef.current = resumeConv.length
-    setConversation(resumeConv)
+    // Localize the welcome + resumed question into the session's language.
+    const resumeLoc = await localize(resumeConv.map(m => m.content), session.language)
+    setConversation(resumeConv.map((m, i) => ({ ...m, content: resumeLoc[i] ?? m.content })))
     setPhase('interview')
     setShowSignIn(false)
     setResumableSession(null)
@@ -889,7 +954,8 @@ export default function InterviewPage() {
 
     const followup = INTRO_FOLLOWUPS[newTurns - 1]
     if (followup) {
-      setConversation(prev => [...prev, { role: 'assistant', content: followup }])
+      const [followupLoc] = await localize([followup])
+      setConversation(prev => [...prev, { role: 'assistant', content: followupLoc }])
     }
     setLoading(false)
   }

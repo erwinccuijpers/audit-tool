@@ -66,7 +66,6 @@ function ResultsContent() {
   const [report, setReport] = useState<Report | null>(null)
   const [businessName, setBusinessName] = useState('')
   const [loading, setLoading] = useState(true)
-  const [regenerating, setRegenerating] = useState(false)
   const [error, setError] = useState('')
   const [openArea, setOpenArea] = useState<number | null>(null)
   const [expandAll, setExpandAll] = useState(false)
@@ -98,15 +97,6 @@ function ResultsContent() {
   function downloadPdf() {
     setExpandAll(true)
     setTimeout(() => window.print(), 300)
-  }
-
-  async function handleRegenerate() {
-    if (regenerating || !sessionId) return
-    setRegenerating(true)
-    const res = await ensureReport(sessionId, { force: true })
-    if (res.error) setError(res.error)
-    else { setReport(res.report ?? null); setBusinessName(res.businessName || '') }
-    setRegenerating(false)
   }
 
   if (loading) return (
@@ -175,39 +165,25 @@ function ResultsContent() {
           html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #0C0C09 !important; }
         }
       `}</style>
-      {/* Shared client nav (hidden when printing to PDF) */}
-      <div className="no-print">
-        <ClientNav
-          sessionId={sessionId}
-          active="results"
-          businessName={businessName}
-          actions={
-            <>
-              <button
-                onClick={downloadPdf}
-                title="Download this report as a PDF"
-                style={{
-                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
-                  padding: '5px 12px', color: '#6A6450', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em', cursor: 'pointer',
-                }}
-              >⤓ Download PDF</button>
-              <button
-                onClick={handleRegenerate}
-                disabled={regenerating}
-                title="Regenerate this report from the interview data"
-                style={{
-                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
-                  padding: '5px 12px', color: regenerating ? '#3A3A28' : '#6A6450',
-                  fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em',
-                  cursor: regenerating ? 'default' : 'pointer',
-                }}
-              >
-                {regenerating ? 'Regenerating…' : '↻ Regenerate'}
-              </button>
-            </>
-          }
-        />
-      </div>
+      {/* Shared client nav (hidden when printing to PDF). Rendered directly (not
+          inside a wrapper div) so its position:sticky has the full page as its
+          containing block and stays pinned while scrolling the report. */}
+      <ClientNav
+        className="no-print"
+        sessionId={sessionId}
+        active="results"
+        businessName={businessName}
+        actions={
+          <button
+            onClick={downloadPdf}
+            title="Download this report as a PDF"
+            style={{
+              background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
+              padding: '5px 12px', color: '#6A6450', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em', cursor: 'pointer',
+            }}
+          >⤓ Download PDF</button>
+        }
+      />
       {/* Report document header */}
       <div style={{ background: '#0F0F0B', borderBottom: '1px solid #1A1A14', padding: '20px 32px' }}>
         <div style={{ maxWidth: 860, margin: '0 auto' }}>

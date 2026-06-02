@@ -25,7 +25,7 @@ Extract a business profile as JSON with exactly this structure:
   "awareness_level": "one of: knows_the_gap / has_a_hunch / no_idea",
   "owner_tone": "one of: confident / stressed / defensive / excited / uncertain",
   "first_name": "owner first name if mentioned, otherwise null",
-  "has_employees": true or false — true if the business clearly has staff, team members, or employees beyond just the owner; false if they appear to run it solo or haven't mentioned any staff,
+  "has_employees": true, false, or null — set true ONLY if the owner explicitly mentions staff, employees, a team, or co-workers; set false ONLY if they explicitly state they run it solo / "just me" / no staff; otherwise null. Do NOT infer from the type of business — "I have a webshop selling X" tells you nothing about whether they have staff, so that stays null. Absence of any mention = null, never false.,
   "skip_questions": ["list of question IDs from this set that are clearly irrelevant based on what was said: q21, q22, t3, t4, t6"],
   "emphasis_areas": ["list of category names that seem most relevant based on what was said, from: positioning, acquisition, retention, revenue, strategy, tools, people"]
 }

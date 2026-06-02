@@ -746,14 +746,29 @@ function TranscriptModal({ session, onClose }: { session: Session; onClose: () =
   )
 }
 
-function ClientCard({ session, adminEmail, allSessions }: { session: Session; adminEmail: string; allSessions: Session[] }) {
+function ClientCard({ session, adminEmail, allSessions, onReloadSessions }: { session: Session; adminEmail: string; allSessions: Session[]; onReloadSessions: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false)
+  const [moving, setMoving] = useState(false)
   const [analysis, setAnalysis] = useState<any>(session.admin_analysis || null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [rawResponses, setRawResponses] = useState<RawResponse[] | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+
+  async function moveBucket(e: React.MouseEvent) {
+    e.stopPropagation()
+    const target = !session.is_test
+    if (!window.confirm(`Move "${session.business_name || 'this client'}" to ${target ? 'DEMO' : 'REAL'}? All its data moves with it.`)) return
+    setMoving(true)
+    const res = await fetch('/api/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_test', sessionId: session.id, isTest: target, adminEmail }),
+    })
+    if (res.ok) await onReloadSessions()
+    setMoving(false)
+  }
 
   function copyResumeLink(e: React.MouseEvent) {
     e.stopPropagation()
@@ -853,6 +868,20 @@ function ClientCard({ session, adminEmail, allSessions }: { session: Session; ad
           }}
         >
           {copied ? '✓ copied' : '⎘ link'}
+        </button>
+        <button
+          onClick={moveBucket}
+          disabled={moving}
+          title={session.is_test ? 'Move to Real clients' : 'Move to Demo bucket'}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${session.is_test ? '#3A5A3A' : '#5A3A1A'}`,
+            borderRadius: 4, padding: '2px 8px', cursor: moving ? 'default' : 'pointer',
+            color: moving ? '#3A3A28' : (session.is_test ? '#7AAA7A' : '#C0905A'),
+            ...mono, fontSize: 9, letterSpacing: '0.06em', flexShrink: 0,
+          }}
+        >
+          {moving ? '…' : (session.is_test ? '→ real' : '→ demo')}
         </button>
         <span style={{ color: '#2A2A20', fontSize: 10 }}>{expanded ? '▲' : '▼'}</span>
       </div>
@@ -1910,7 +1939,7 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   filteredSessions.map(s => (
-                    <ClientCard key={s.id} session={s} adminEmail={user.email} allSessions={sessions} />
+                    <ClientCard key={s.id} session={s} adminEmail={user.email} allSessions={sessions} onReloadSessions={loadSessions} />
                   ))
                 )}
               </div>
