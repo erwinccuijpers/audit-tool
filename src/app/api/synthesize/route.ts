@@ -121,7 +121,13 @@ REQUIREMENTS:
 - "report.areas" must always include all of these categories: Positioning, Acquisition, Retention, Revenue, Strategy, Tools & Systems, People.
 - "pillars" must contain an entry for EVERY one of these section names that appears in the transcript: ${pillarNames.join(', ')}. Never leave one blank or generic — every section above has real conversation to draw from.
 - ${staffNote}
-- Score honestly — do not inflate. If something genuinely wasn't discussed, score it 2.
+- Score each area on its own merits and USE THE FULL 1-5 RANGE — do not cluster everything in the middle:
+    1 = critical — actively losing money or an imminent risk
+    2 = weak — significant gaps, little structure in place
+    3 = functional — works, but with clear unrealised upside
+    4 = strong — a genuine, defensible strength with only minor gaps
+    5 = excellent — a real competitive advantage, well run
+  Reflect real evidence: a strength the owner can back up (high retention, long client tenure, strong repeat rate, proven demand, a loyal base, a high win-rate) should land at 4-5 even when other areas are weak — do NOT flatten a strong area down to match the weak ones. Reserve 1-2 for areas with real, named problems. Don't inflate, but don't deflate either: if an area was discussed and is simply average, score it 3, not 2. Only use 2 as a default when the area genuinely wasn't covered.
 - Where the owner deliberately deprioritised something (a known issue they chose not to act on because something else mattered more), reflect that judgement: say whether their sequencing looks sound or whether they should switch focus.
 - SURFACE OPERATIONAL / WORKFLOW BOTTLENECKS the owner treats as normal. If the transcript shows how the work physically gets delivered — kitchen/workspace layout, storage forcing repeated trips, an over-broad offer or menu, things that can't be done in parallel, work coming out in waves under load, or trade-offs made when something goes wrong mid-service — name it as a concrete observation even though the owner did not frame it as a problem. These "it's just how it's always been" constraints are usually invisible to the owner and are often the real ceiling on quality and growth, so they belong in the Strategy area insight and, where actionable, in quickWins or bigBets (e.g. narrowing the menu, splitting lunch/dinner, reorganising prep or storage).
 
