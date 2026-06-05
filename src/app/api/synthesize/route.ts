@@ -1,7 +1,21 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { computeCostUSD } from '@/lib/pricing'
+
+// Synthesis generates up to 8000 tokens in one pass over the full transcript and
+// can run 60-150s. Give it real headroom (Vercel Pro allows up to 300s) so the
+// function is never killed mid-generation — the default ~15s cap was the root
+// cause of reports that "never loaded".
+export const maxDuration = 300
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+
+const PILLAR_ORDER = ['positioning', 'acquisition', 'retention', 'revenue', 'strategy', 'tools', 'people']
+const PILLAR_LABELS: Record<string, string> = {
+  positioning: 'Positioning', acquisition: 'Acquisition', retention: 'Retention',
+  revenue: 'Revenue', strategy: 'Strategy', tools: 'Tools & Systems', people: 'People',
+}
 
 type PillarInput = { name: string; label: string; conversation: { role: string; content: string }[] }
 
@@ -10,18 +24,59 @@ type PillarInput = { name: string; label: string; conversation: { role: string; 
 // failed call), this runs ONCE over the FULL transcript and produces both the
 // final report AND a fresh deep-dive for every pillar — so they're cross-aware
 // (e.g. People knows about staff surfaced in Acquisition) and nothing is blank.
+//
+// It also PERSISTS the result server-side (report + scores + firmographics +
+// refreshed pillars + usage). That's deliberate: the client used to do the write
+// after a long-held fetch, so a dropped connection (a mobile tab backgrounded
+// mid-wait) lost the report. Now the route owns the write and the client just
+// polls the DB for it. Takes only `{ sessionId }` — it reads everything else.
 export async function POST(req: NextRequest) {
-  const { businessName, pillars, language, hasEmployees } = await req.json()
-  const lang = language || 'English'
+  const { sessionId, force } = await req.json()
+  if (!sessionId) return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
 
-  const transcript = (pillars as PillarInput[]).map(p => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data: session } = await supabase.from('sessions').select('*').eq('id', sessionId).single()
+  if (!session) return NextResponse.json({ error: 'Session not found.' }, { status: 404 })
+  if (session.status !== 'interview_done' && session.status !== 'completed') {
+    return NextResponse.json({ error: "This interview isn't complete yet." }, { status: 409 })
+  }
+
+  // Idempotent: a report already exists → serve it. Stops a refresh or a
+  // double-fire from re-spending on a fresh synthesis.
+  if (session.report && !force) {
+    return NextResponse.json({ report: session.report, pillars: session.dashboard_cache?.pillars || {} })
+  }
+
+  const businessName = session.business_name || ''
+  const lang = session.language || 'English'
+  const hasEmployees = session.has_employees
+
+  const pillarsObj: Record<string, any> = session.dashboard_cache?.pillars || {}
+  const pillarInputs: PillarInput[] = PILLAR_ORDER
+    .filter(p => pillarsObj[p])
+    .map(p => ({
+      name: p,
+      label: PILLAR_LABELS[p] || p,
+      conversation: pillarsObj[p].conversation || [
+        { role: 'assistant', content: pillarsObj[p].contextSummary || '' },
+      ],
+    }))
+  if (pillarInputs.length === 0) {
+    return NextResponse.json({ error: 'No interview data found for this session.' }, { status: 422 })
+  }
+
+  const transcript = pillarInputs.map(p => {
     const lines = (p.conversation || [])
       .map(m => `${m.role === 'user' ? 'Owner' : 'Consultant'}: ${m.content}`)
       .join('\n')
     return `### ${p.label.toUpperCase()} ###\n${lines}`
   }).join('\n\n')
 
-  const pillarNames = (pillars as PillarInput[]).map(p => p.name)
+  const pillarNames = pillarInputs.map(p => p.name)
   const staffNote = hasEmployees === false
     ? 'This owner runs the business SOLO (no staff) — assess People as owner-dependency / key-person risk.'
     : hasEmployees === true
@@ -68,6 +123,7 @@ REQUIREMENTS:
 - ${staffNote}
 - Score honestly — do not inflate. If something genuinely wasn't discussed, score it 2.
 - Where the owner deliberately deprioritised something (a known issue they chose not to act on because something else mattered more), reflect that judgement: say whether their sequencing looks sound or whether they should switch focus.
+- SURFACE OPERATIONAL / WORKFLOW BOTTLENECKS the owner treats as normal. If the transcript shows how the work physically gets delivered — kitchen/workspace layout, storage forcing repeated trips, an over-broad offer or menu, things that can't be done in parallel, work coming out in waves under load, or trade-offs made when something goes wrong mid-service — name it as a concrete observation even though the owner did not frame it as a problem. These "it's just how it's always been" constraints are usually invisible to the owner and are often the real ceiling on quality and growth, so they belong in the Strategy area insight and, where actionable, in quickWins or bigBets (e.g. narrowing the menu, splitting lunch/dinner, reorganising prep or storage).
 
 LANGUAGE: Write all text values in ${lang}. JSON keys (and pillar names) stay in English.
 
@@ -94,5 +150,67 @@ Return ONLY the JSON object, no markdown, no explanation.`
   if (!parsed.report) {
     return NextResponse.json({ error: 'Failed to parse synthesis', raw: text }, { status: 500 })
   }
-  return NextResponse.json({ report: parsed.report, pillars: parsed.pillars || {}, usage: response.usage })
+
+  const generated = parsed.report
+  const refreshedPillars: Record<string, any> = parsed.pillars || {}
+
+  // ── Persist server-side (so a dropped client connection can't lose it) ──
+  const scoreMap: Record<string, number> = {}
+  if (generated.areas?.length > 0) generated.areas.forEach((a: any) => { scoreMap[a.category] = a.score })
+
+  const f = generated.firmographics || {}
+  const firmoPatch: Record<string, any> = {}
+  if (f.niche != null) firmoPatch.niche = f.niche
+  if (typeof f.employee_count === 'number') firmoPatch.employee_count = f.employee_count
+  if (f.size_band != null) firmoPatch.size_band = f.size_band
+  if (f.revenue_band != null) firmoPatch.revenue_band = f.revenue_band
+  if (typeof f.years_in_business === 'number') firmoPatch.years_in_business = f.years_in_business
+  if (f.region != null) firmoPatch.region = f.region
+
+  // Fold the synthesis' refreshed deep-dives back into dashboard_cache, overwriting
+  // the incremental (possibly stubbed) situation / recommendation / entities while
+  // preserving each pillar's raw conversation + metadata.
+  const mergedPillars: Record<string, any> = { ...pillarsObj }
+  for (const [name, d] of Object.entries(refreshedPillars)) {
+    if (!mergedPillars[name]) continue
+    const rd = d as any
+    mergedPillars[name] = {
+      ...mergedPillars[name],
+      situation: rd.situation ?? mergedPillars[name].situation,
+      recommendation: rd.recommendation ?? mergedPillars[name].recommendation,
+      confidence: typeof rd.confidence === 'number' ? rd.confidence : mergedPillars[name].confidence,
+      entities: rd.entities ?? mergedPillars[name].entities,
+      dataGaps: rd.dataGaps ?? mergedPillars[name].dataGaps,
+    }
+  }
+
+  // Fold this generation's tokens into the session's running totals + cost.
+  const u = response.usage
+  const input = (session.input_tokens ?? 0) + (u?.input_tokens ?? 0)
+  const output = (session.output_tokens ?? 0) + (u?.output_tokens ?? 0)
+
+  await supabase.from('sessions').update({
+    status: 'completed',
+    scores: Object.keys(scoreMap).length > 0 ? scoreMap : null,
+    report: generated,
+    ...firmoPatch,
+    dashboard_cache: { v: 2, pillars: mergedPillars },
+    input_tokens: input,
+    output_tokens: output,
+    cost_usd: computeCostUSD(input, output),
+  }).eq('id', sessionId)
+
+  // Pattern-match (admin analytics) — fire after the response, non-blocking.
+  const origin = new URL(req.url).origin
+  after(async () => {
+    try {
+      await fetch(`${origin}/api/pattern-match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+    } catch { /* non-critical */ }
+  })
+
+  return NextResponse.json({ report: generated, pillars: mergedPillars })
 }

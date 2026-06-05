@@ -12,7 +12,7 @@ const PILLAR_FOCUS: Record<string, string> = {
   acquisition:  'how new clients find and decide to buy, what channels actually work, and what the acquisition cost and conversion looks like',
   retention:    'how much repeat business exists, what client lifetime value looks like, and whether there is any system for keeping or re-engaging clients',
   revenue:      'average transaction value, upsell and cross-sell behaviour, untapped revenue adjacencies, and pricing logic',
-  strategy:     'long-term direction, capacity constraints, risk tolerance, pricing strategy, and operational bottlenecks',
+  strategy:     'long-term direction, pricing strategy, risk tolerance, and — crucially — how the work actually gets delivered day-to-day and where that flow physically breaks down under load (capacity, space, sequencing, prep, the trade-offs made when something goes wrong mid-service)',
   tools:        'the tech stack (POS, CRM, scheduling, accounting, loyalty), what data it produces, and whether the owner actually uses that data',
   people:       'team stability, retention, culture, how much relies on the owner personally, and what is at risk if a key person leaves',
 }
@@ -66,6 +66,21 @@ Do NOT ask about staff retention, team churn, hiring, who might leave, or workpl
   } else if (pillarName === 'people' && staffUnknown) {
     soloPeopleGuard = `\n\nIMPORTANT — YOU DO NOT YET KNOW IF THIS OWNER HAS STAFF:
 Open by establishing it, naturally: "Before we get into this — is it just you running things, or do you have people working with you?" Do NOT assume "it's just you." Then adapt: if they have a team, explore stability, delegation, and key-person risk; if it's just them, pivot to owner-dependency and continuity (what happens if they're out, who could cover, what only lives in their head).`
+  }
+
+  // Operational-workflow probe — the single biggest blind spot in past reports.
+  // Owners almost never volunteer their day-to-day delivery friction because
+  // it's "just how it's always been," so the consultant must actively dig it out.
+  let opsProbe = ''
+  if (pillarName === 'strategy') {
+    opsProbe = `\n\nOPERATIONAL REALITY — DIG FOR THIS, DON'T WAIT FOR IT:
+Owners rarely raise their day-to-day delivery friction on their own — it feels normal to them, so they don't think to mention it. You must walk them through it. Take them through their busiest, most stressful service / job / period, start to finish, and find where the work physically breaks down:
+- What can't they do in parallel? Where do they lose time or have to backtrack?
+- How do space, storage, layout, equipment or prep force awkward sequencing? (e.g. trips to a stockroom/cellar, a station that bottlenecks, a tool only one person can use)
+- When something goes wrong mid-service, what do they sacrifice to keep the rest moving — and how often does that happen?
+- Is the offer/menu/service range wider than the setup can comfortably deliver? Could fewer, clearer options or splitting parts of the day ease the strain?
+- What would they change about how the work flows if they could?
+These constraints are often the real ceiling on quality and growth. Surface them as concrete observations even when the owner treats them as unremarkable — this is exactly the kind of thing they can't see for themselves.`
   }
 
   // Facts already established in earlier sections — surfaced prominently so the
@@ -122,7 +137,7 @@ ${prevContext ? `WHAT YOU ALREADY KNOW FROM EARLIER SECTIONS:\n${prevContext}` :
 ${establishedFacts ? `\nALREADY ESTABLISHED — DO NOT RE-ASK:\n${establishedFacts}` : ''}
 
 YOUR MISSION FOR THIS SECTION — ${pillarLabel.toUpperCase()}:
-Get enough data to write a genuinely useful diagnostic for: ${pillarFocus}${soloPeopleGuard}
+Get enough data to write a genuinely useful diagnostic for: ${pillarFocus}${soloPeopleGuard}${opsProbe}
 
 QUESTION BANK FOR THIS SECTION (use as inspiration — adapt freely, reorder, skip if irrelevant, add your own if the conversation leads somewhere better):
 ${questionBank}

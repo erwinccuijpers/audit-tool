@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import FeedbackButton from '@/components/FeedbackButton'
 import ClientNav from '@/components/ClientNav'
-import { ensureReport } from '@/lib/report'
+import { loadReport } from '@/lib/report'
 
 type AreaScore = {
   category: string
@@ -70,6 +70,14 @@ function ResultsContent() {
   const [openArea, setOpenArea] = useState<number | null>(null)
   const [expandAll, setExpandAll] = useState(false)
   const printMode = searchParams.get('print') === '1'
+  // Seconds on the loader — drives a reassurance line once the build runs long
+  // (synthesis over the full transcript can take ~a minute).
+  const [loaderSeconds, setLoaderSeconds] = useState(0)
+  useEffect(() => {
+    if (!loading) return
+    const t = setInterval(() => setLoaderSeconds(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [loading])
 
   useEffect(() => {
     if (!sessionId) {
@@ -77,11 +85,12 @@ function ResultsContent() {
       setLoading(false)
       return
     }
-    ensureReport(sessionId).then(res => {
-      if (res.error) setError(res.error)
-      else { setReport(res.report ?? null); setBusinessName(res.businessName || '') }
-      setLoading(false)
-    })
+    const cleanup = loadReport(
+      sessionId,
+      (rep, bn) => { setReport(rep); setBusinessName(bn); setLoading(false) },
+      (msg) => { setError(msg); setLoading(false) },
+    )
+    return cleanup
   }, [sessionId])
 
   // When arriving with ?print=1 (the hub's "Download PDF"), expand everything
@@ -134,8 +143,18 @@ function ResultsContent() {
             }} />
           ))}
         </div>
-        <div style={{ color: '#2A2A1E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
-          Analyzing your answers…
+        <div style={{ textAlign: 'center', lineHeight: 1.7 }}>
+          <div style={{ color: '#2A2A1E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
+            Analyzing your answers — this can take up to a minute…
+          </div>
+          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginTop: 8 }}>
+            Keep this screen open — your report appears here automatically when it&apos;s ready.
+          </div>
+          {loaderSeconds >= 30 && (
+            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginTop: 8 }}>
+              Still gathering — no worries, this one&apos;s taking a bit longer.
+            </div>
+          )}
         </div>
         <FeedbackButton sessionId={sessionId} context={{ phase: 'report_loading' }} />
       </div>
