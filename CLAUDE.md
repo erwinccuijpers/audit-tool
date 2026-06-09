@@ -13,7 +13,7 @@ A structured business diagnostic interview tool that helps small business owners
 - **Frontend + API routes:** Next.js (App Router), deployed on Vercel
 - **AI:** Anthropic API — `claude-sonnet-4-6`
 - **Database:** Supabase (questions, sessions, responses tables)
-- **Styling:** Inline styles, dark theme (`#0C0C09` background, `#C8A96E` gold accent)
+- **Styling:** Inline styles. **Light theme** for client-facing pages (warm off-white `#FBFAF7` paper, charcoal `#2A2A28` ink, gold `#C8A96E` as accent only — bright on fills/bars, darkened to `#8A6D2F` for text). Shared nav chrome (`ClientNav`/`SideNav`/`FeedbackButton`) is intentionally **dark** ("masthead"). The **admin** page is still on the old dark theme (deferred). The PDF export (`ReportPdf.tsx`) uses the same light palette.
 
 ---
 
@@ -108,7 +108,17 @@ This creates a named restore point on GitHub. If anything breaks, roll back with
 git checkout v-snapshot-<name>
 ```
 
-The live URL always reflects the latest push to `main`. Tags are safety nets, not deployments.
+## Deploying — IMPORTANT: pushing to `main` does NOT deploy
+
+There is **no GitHub auto-deploy**. Pushing to `origin/main` only updates GitHub; pocketcmo.pro stays on the last manually-deployed build. To actually ship, run a manual production deploy with the Vercel CLI from the repo root:
+
+```bash
+npx vercel --prod --yes
+```
+
+(Vercel project `audit-tool`, account `gameoferwin-7712`. Verify a deploy shipped by checking the live site, e.g. grep a `pocketcmo.pro/results` JS chunk for a known new string.) Tags are local restore points, not deployments.
+
+> Note: this repo exists in two local clones that drift — edit/deploy from the one that matches `origin/main`. The Claude preview tool may launch the stale clone.
 
 ---
 
