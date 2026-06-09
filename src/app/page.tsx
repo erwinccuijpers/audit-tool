@@ -1411,29 +1411,29 @@ export default function InterviewPage() {
   // ─── SHARED STYLES ────────────────────────────────────────────────────────────
 
   const inputStyle: React.CSSProperties = {
-    width: '100%', background: '#0C0C09', border: '1px solid #222218', borderRadius: 6,
-    padding: '12px 14px', color: '#E8E0D0', fontFamily: 'monospace', fontSize: 14,
+    width: '100%', background: '#FBFAF7', border: '1px solid #D8D2C6', borderRadius: 6,
+    padding: '12px 14px', color: '#2A2A28', fontFamily: 'monospace', fontSize: 14,
     outline: 'none', marginBottom: 10, boxSizing: 'border-box',
   }
 
   const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-    width: '100%', background: disabled ? '#1A1A14' : '#C8A96E', border: 'none', borderRadius: 6,
-    padding: '13px', color: disabled ? '#4A4A38' : '#0C0C09', fontFamily: 'monospace', fontSize: 14,
+    width: '100%', background: disabled ? '#E5E1D8' : '#8A6D2F', border: 'none', borderRadius: 6,
+    padding: '13px', color: disabled ? '#8A857A' : '#1A1815', fontFamily: 'monospace', fontSize: 14,
     fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1, marginBottom: 10,
   })
 
   const ghostBtn: React.CSSProperties = {
     width: '100%', background: 'transparent', border: 'none',
-    padding: '8px', color: '#3A3A28', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+    padding: '8px', color: '#8A857A', fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
   }
 
   const cardWrap: React.CSSProperties = {
-    minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center',
+    minHeight: '100dvh', background: '#FBFAF7', display: 'flex', alignItems: 'center',
     justifyContent: 'center', fontFamily: 'Georgia, serif', padding: '20px',
   }
 
   const card: React.CSSProperties = {
-    background: '#111110', border: '1px solid #222218', borderRadius: 12,
+    background: '#FFFFFF', border: '1px solid #D8D2C6', borderRadius: 12,
     padding: '32px 28px', width: '100%', maxWidth: 420,
   }
 
@@ -1443,9 +1443,9 @@ export default function InterviewPage() {
     return (
       <div style={cardWrap}>
         <div style={card}>
-          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ACCOUNT</div>
-          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 20 }}>Set a new password</h2>
-          {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }}>{authError}</div>}
+          <div style={{ color: '#6B675E', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ACCOUNT</div>
+          <h2 style={{ color: '#2A2A28', fontSize: 20, fontWeight: 400, marginBottom: 20 }}>Set a new password</h2>
+          {authError && <div style={{ color: '#BF4A2E', fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }}>{authError}</div>}
           <input
             type="password"
             placeholder="New password (min. 6 characters)"
@@ -1468,15 +1468,15 @@ export default function InterviewPage() {
     return (
       <div style={cardWrap}>
         <div style={card}>
-          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
-          <h1 style={{ color: '#E8E0D0', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
-          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 20, lineHeight: 1.6 }}>
+          <div style={{ color: '#6B675E', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>BUSINESS AUDIT</div>
+          <h1 style={{ color: '#2A2A28', fontSize: 24, fontWeight: 400, marginBottom: 8 }}>Diagnostic Interview</h1>
+          <p style={{ color: '#6B675E', fontSize: 13, fontFamily: 'monospace', marginBottom: 20, lineHeight: 1.6 }}>
             Goes deep into how your business actually works — maps exactly where you're leaving money on the table.
           </p>
 
           {/* Language picker */}
           <div style={{ marginBottom: 24 }}>
-            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 8 }}>LANGUAGE</div>
+            <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 8 }}>LANGUAGE</div>
             <div style={{ display: 'flex', gap: 6 }}>
               {LANGUAGES.map(l => (
                 <button
@@ -1484,9 +1484,9 @@ export default function InterviewPage() {
                   onClick={() => setLanguage(l.code)}
                   style={{
                     background: language === l.code ? 'rgba(200,169,110,0.1)' : 'transparent',
-                    border: `1px solid ${language === l.code ? 'rgba(200,169,110,0.4)' : '#1E1E14'}`,
+                    border: `1px solid ${language === l.code ? 'rgba(200,169,110,0.4)' : '#E5E1D8'}`,
                     borderRadius: 6, padding: '7px 13px', cursor: 'pointer',
-                    color: language === l.code ? '#C8A96E' : '#3A3A28',
+                    color: language === l.code ? '#8A6D2F' : '#8A857A',
                     fontFamily: 'monospace', fontSize: 12,
                     display: 'flex', alignItems: 'center', gap: 6,
                     transition: 'all 0.15s',
@@ -1508,16 +1508,16 @@ export default function InterviewPage() {
 
           {resumableSession && !showSignIn && authChecked && (
             <div style={{
-              background: '#141410', border: '1px solid rgba(200,169,110,0.2)',
+              background: '#F4F1EA', border: '1px solid rgba(200,169,110,0.2)',
               borderRadius: 8, padding: '14px 16px', marginBottom: 16,
             }}>
-              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginBottom: 6 }}>IN PROGRESS</div>
-              <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 14, marginBottom: 10 }}>{resumableSession.business_name}</div>
+              <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginBottom: 6 }}>IN PROGRESS</div>
+              <div style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 14, marginBottom: 10 }}>{resumableSession.business_name}</div>
               <button
                 onClick={() => resumeSession(resumableSession)}
                 style={{
-                  width: '100%', background: '#1A1A12', border: '1px solid rgba(200,169,110,0.25)',
-                  borderRadius: 6, padding: '10px', color: '#C8A96E',
+                  width: '100%', background: '#E5E1D8', border: '1px solid rgba(200,169,110,0.25)',
+                  borderRadius: 6, padding: '10px', color: '#8A6D2F',
                   fontFamily: 'monospace', fontSize: 13, cursor: 'pointer',
                 }}
               >
@@ -1538,8 +1538,8 @@ export default function InterviewPage() {
               <button onClick={startSession} style={primaryBtn(false)}>Start →</button>
               {!user && authChecked && (
                 <button onClick={() => setShowSignIn(true)} style={{
-                  width: '100%', background: 'transparent', border: '1px solid #1E1E14',
-                  borderRadius: 6, padding: '11px', color: '#4A4A38',
+                  width: '100%', background: 'transparent', border: '1px solid #E5E1D8',
+                  borderRadius: 6, padding: '11px', color: '#8A857A',
                   fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
                 }}>
                   ↩ Continue where you left off
@@ -1548,10 +1548,10 @@ export default function InterviewPage() {
             </>
           ) : showForgotPassword ? (
             <>
-              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>RESET PASSWORD</div>
-              {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
+              <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>RESET PASSWORD</div>
+              {authError && <div style={{ color: '#BF4A2E', fontFamily: 'monospace', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
               {forgotPasswordSent ? (
-                <div style={{ color: '#7A9A7A', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
+                <div style={{ color: '#3F7E68', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
                   Check your email — we've sent a reset link.
                 </div>
               ) : (
@@ -1568,8 +1568,8 @@ export default function InterviewPage() {
             </>
           ) : (
             <>
-              <div style={{ color: '#6A6A52', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>SIGN IN TO RESUME</div>
-              {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>{authError}</div>}
+              <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em', marginBottom: 12 }}>SIGN IN TO RESUME</div>
+              {authError && <div style={{ color: '#BF4A2E', fontFamily: 'monospace', fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>{authError}</div>}
               <input placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={inputStyle} />
               <input
                 type="password"
@@ -1605,10 +1605,10 @@ export default function InterviewPage() {
 
   if (phase === 'classifying') {
     return (
-      <div style={{ minHeight: '100dvh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ minHeight: '100dvh', background: '#FBFAF7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', padding: '0 20px' }}>
-          <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13, marginBottom: 8 }}>Analysing your business...</div>
-          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>Personalising the interview for you</div>
+          <div style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 13, marginBottom: 8 }}>Analysing your business...</div>
+          <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 11 }}>Personalising the interview for you</div>
         </div>
       </div>
     )
@@ -1621,9 +1621,9 @@ export default function InterviewPage() {
     return (
       <div style={cardWrap}>
         <div style={card}>
-          <div style={{ color: '#6A6A52', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ONE LAST THING</div>
-          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>How did you find us?</h2>
-          <p style={{ color: '#6A6A52', fontSize: 13, fontFamily: 'monospace', marginBottom: 20, lineHeight: 1.6 }}>
+          <div style={{ color: '#6B675E', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>ONE LAST THING</div>
+          <h2 style={{ color: '#2A2A28', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>How did you find us?</h2>
+          <p style={{ color: '#6B675E', fontSize: 13, fontFamily: 'monospace', marginBottom: 20, lineHeight: 1.6 }}>
             Helps us reach more business owners like you.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
@@ -1632,12 +1632,12 @@ export default function InterviewPage() {
                 key={opt}
                 onClick={() => handleReferral(opt)}
                 style={{
-                  background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 8,
-                  padding: '11px 16px', color: '#C8C8B0', fontFamily: 'monospace',
+                  background: 'transparent', border: '1px solid #D8D2C6', borderRadius: 8,
+                  padding: '11px 16px', color: '#2A2A28', fontFamily: 'monospace',
                   fontSize: 13, cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.4)'; e.currentTarget.style.color = '#C8A96E' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = '#2A2A1E'; e.currentTarget.style.color = '#C8C8B0' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.4)'; e.currentTarget.style.color = '#8A6D2F' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#D8D2C6'; e.currentTarget.style.color = '#2A2A28' }}
               >
                 {opt}
               </button>
@@ -1663,22 +1663,22 @@ export default function InterviewPage() {
       onSave={() => setShowSaveOverlay(true)}
     />
     <div style={{
-      flex: 1, minWidth: 0, background: '#0C0C09', display: 'flex', flexDirection: 'column',
+      flex: 1, minWidth: 0, background: '#FBFAF7', display: 'flex', flexDirection: 'column',
       fontFamily: 'Georgia, serif', overflow: 'hidden',
     }}>
 
       {/* Header */}
       <div style={{
-        background: '#0F0F0B', borderBottom: '1px solid #1A1A14',
+        background: '#FFFFFF', borderBottom: '1px solid #E5E1D8',
         padding: '10px 16px', display: 'flex', alignItems: 'center',
         gap: 10, flexShrink: 0, flexWrap: 'wrap',
       }}>
-        <span style={{ color: '#6A6A52', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.1em' }}>POCKET CMO</span>
-        <span style={{ color: '#C8A96E', fontSize: 12, fontFamily: 'monospace' }}>{businessName}</span>
+        <span style={{ color: '#6B675E', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.1em' }}>POCKET CMO</span>
+        <span style={{ color: '#8A6D2F', fontSize: 12, fontFamily: 'monospace' }}>{businessName}</span>
         {profile && (
           <span style={{
-            fontSize: 10, fontFamily: 'monospace', color: '#3A3A28',
-            background: '#141410', border: '1px solid #1E1E14',
+            fontSize: 10, fontFamily: 'monospace', color: '#8A857A',
+            background: '#F4F1EA', border: '1px solid #E5E1D8',
             borderRadius: 4, padding: '2px 7px',
           }}>
             {profile.industry} · {profile.business_type}
@@ -1686,8 +1686,8 @@ export default function InterviewPage() {
         )}
         {user ? (
           <span style={{
-            fontSize: 10, fontFamily: 'monospace', color: '#4A6A4A',
-            background: '#101410', border: '1px solid #1A2A1A',
+            fontSize: 10, fontFamily: 'monospace', color: '#6A8A78',
+            background: '#EFF5F1', border: '1px solid #D8E5DC',
             borderRadius: 4, padding: '2px 7px',
           }}>
             ✓ saving
@@ -1696,8 +1696,8 @@ export default function InterviewPage() {
           <button
             onClick={() => setShowSaveOverlay(true)}
             style={{
-              fontSize: 10, fontFamily: 'monospace', color: '#8A5A30',
-              background: '#1A1008', border: '1px solid rgba(180,100,30,0.3)',
+              fontSize: 10, fontFamily: 'monospace', color: '#8A5A20',
+              background: '#FBF2E8', border: '1px solid rgba(180,100,30,0.3)',
               borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
             }}
           >
@@ -1709,9 +1709,9 @@ export default function InterviewPage() {
             className="pocket-mobile-dash"
             onClick={() => window.location.href = `/dashboard?session=${sessionId}`}
             style={{
-              background: 'transparent', border: '1px solid #1E1E14',
+              background: 'transparent', border: '1px solid #E5E1D8',
               borderRadius: 5, padding: '4px 10px', cursor: 'pointer',
-              color: '#4A4A38', fontFamily: 'monospace', fontSize: 10,
+              color: '#8A857A', fontFamily: 'monospace', fontSize: 10,
               letterSpacing: '0.06em', display: 'none',
             }}
           >
@@ -1723,14 +1723,14 @@ export default function InterviewPage() {
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
             {typeof window !== 'undefined' && window.location.search.includes('debug=1') && (
               <span style={{
-                fontSize: 9, fontFamily: 'monospace', color: '#4A6A4A',
-                background: '#0A120A', border: '1px solid #1A2A1A',
+                fontSize: 9, fontFamily: 'monospace', color: '#6A8A78',
+                background: '#EFF5F1', border: '1px solid #D8E5DC',
                 borderRadius: 4, padding: '2px 7px', letterSpacing: '0.04em',
               }}>
                 ↑{tokenTotals.current.input.toLocaleString()} ↓{tokenTotals.current.output.toLocaleString()} tok
               </span>
             )}
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#3A3A28' }}>
+            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#8A857A' }}>
               {pillarMode
                 ? `${Object.keys(pillarSummaries).length} of ${PILLAR_ORDER.length} sections`
                 : `${completedSummaries.length} of ${questions.length} topics`}
@@ -1742,7 +1742,7 @@ export default function InterviewPage() {
       {/* Pillar progress strip (pillar mode) */}
       {phase === 'interview' && pillarMode && (
         <div style={{
-          background: '#0A0A07', borderBottom: '1px solid #111110',
+          background: '#FBFAF7', borderBottom: '1px solid #FFFFFF',
           padding: '6px 16px', display: 'flex', gap: 4, overflowX: 'auto',
           flexShrink: 0, alignItems: 'center',
         }}>
@@ -1753,9 +1753,9 @@ export default function InterviewPage() {
               <div key={p} style={{
                 padding: '3px 10px', borderRadius: 12, fontSize: 10, fontFamily: 'monospace',
                 letterSpacing: '0.05em', whiteSpace: 'nowrap', flexShrink: 0,
-                background: done ? '#0A120A' : active ? '#1A1A10' : 'transparent',
-                border: `1px solid ${done ? '#2A4A2A' : active ? '#3A3A20' : '#1A1A14'}`,
-                color: done ? '#4A8A4A' : active ? '#C8A96E' : '#2A2A1E',
+                background: done ? '#EFF5F1' : active ? '#E5E1D8' : 'transparent',
+                border: `1px solid ${done ? '#BFD8CC' : active ? '#8A857A' : '#E5E1D8'}`,
+                color: done ? '#3F7E68' : active ? '#8A6D2F' : '#D8D2C6',
               }}>
                 {done ? '✓ ' : ''}{PILLAR_LABELS[p as PillarName]}
               </div>
@@ -1763,8 +1763,8 @@ export default function InterviewPage() {
           })}
           {generatingSummary && (
             <span style={{
-              marginLeft: 8, fontFamily: 'monospace', fontSize: 10, color: '#C8A96E',
-              background: '#1E1A10', border: '1px solid #C8A96E30',
+              marginLeft: 8, fontFamily: 'monospace', fontSize: 10, color: '#8A6D2F',
+              background: '#F4F1EA', border: '1px solid #C8A96E30',
               borderRadius: 10, padding: '1px 8px',
               animation: 'pulse 1.5s ease-in-out infinite',
             }}>
@@ -1777,7 +1777,7 @@ export default function InterviewPage() {
       {/* Category flow strip (legacy mode) */}
       {phase === 'interview' && !pillarMode && categoryFlow.length > 1 && (
         <div style={{
-          background: '#0A0A07', borderBottom: '1px solid #111110',
+          background: '#FBFAF7', borderBottom: '1px solid #FFFFFF',
           padding: '6px 16px', display: 'flex', gap: 4, overflowX: 'auto',
           flexShrink: 0, alignItems: 'center',
         }}>
@@ -1801,14 +1801,14 @@ export default function InterviewPage() {
                 style={{
                   fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.06em',
                   padding: '3px 8px', borderRadius: 3, whiteSpace: 'nowrap',
-                  color: isDone ? '#4A4A38' : isCurrent ? '#C8A96E' : isClickable ? '#5A5A3E' : '#2A2A1E',
+                  color: isDone ? '#8A857A' : isCurrent ? '#8A6D2F' : isClickable ? '#D8D2C6' : '#D8D2C6',
                   background: isCurrent ? 'rgba(200,169,110,0.07)' : 'transparent',
-                  border: `1px solid ${isCurrent ? 'rgba(200,169,110,0.18)' : isClickable ? '#2A2A1E' : '#161612'}`,
+                  border: `1px solid ${isCurrent ? 'rgba(200,169,110,0.18)' : isClickable ? '#D8D2C6' : '#F4F1EA'}`,
                   cursor: isClickable ? 'pointer' : 'default',
                   transition: 'all 0.2s',
                 }}
-                onMouseEnter={e => { if (isClickable) { (e.currentTarget as HTMLElement).style.color = '#C8A96E'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(200,169,110,0.3)' } }}
-                onMouseLeave={e => { if (isClickable) { (e.currentTarget as HTMLElement).style.color = '#5A5A3E'; (e.currentTarget as HTMLElement).style.borderColor = '#2A2A1E' } }}
+                onMouseEnter={e => { if (isClickable) { (e.currentTarget as HTMLElement).style.color = '#8A6D2F'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(200,169,110,0.3)' } }}
+                onMouseLeave={e => { if (isClickable) { (e.currentTarget as HTMLElement).style.color = '#D8D2C6'; (e.currentTarget as HTMLElement).style.borderColor = '#D8D2C6' } }}
               >
                 {isDone ? '✓ ' : isSkipped ? '→ ' : ''}{cat.name.toUpperCase()}
               </span>
@@ -1827,10 +1827,10 @@ export default function InterviewPage() {
             }}>
               <div style={{
                 maxWidth: '85%',
-                background: msg.role === 'user' ? '#1A1A12' : '#111110',
-                border: `1px solid ${msg.role === 'user' ? '#2A2A1E' : '#1A1A14'}`,
+                background: msg.role === 'user' ? '#E5E1D8' : '#FFFFFF',
+                border: `1px solid ${msg.role === 'user' ? '#D8D2C6' : '#E5E1D8'}`,
                 borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                padding: '12px 16px', color: '#D0C8B8', fontSize: 15,
+                padding: '12px 16px', color: '#1A1815', fontSize: 15,
                 lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               }}>
                 {msg.content}
@@ -1840,19 +1840,19 @@ export default function InterviewPage() {
           {loading && !aiError && (
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
               <style>{`@keyframes cmo-think { 0%, 100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }`}</style>
-              <div style={{ background: '#111110', border: '1px solid #1A1A14', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 9 }}>
+              <div style={{ background: '#FFFFFF', border: '1px solid #E5E1D8', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 9 }}>
                 {generatingSummary && pillarMode ? (
-                  <span style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 12 }}>
+                  <span style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 12 }}>
                     Wrapping up {PILLAR_LABELS[PILLAR_ORDER[currentPillarIndex] as PillarName] || 'this section'} — pulling your findings together
                   </span>
                 ) : (
-                  <span style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 12 }}>thinking</span>
+                  <span style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12 }}>thinking</span>
                 )}
                 <span style={{ display: 'inline-flex', gap: 3 }}>
                   {[0, 1, 2].map(i => (
                     <span key={i} style={{
                       width: 4, height: 4, borderRadius: '50%',
-                      background: generatingSummary && pillarMode ? '#C8A96E' : '#4A4A38',
+                      background: generatingSummary && pillarMode ? '#8A6D2F' : '#8A857A',
                       animation: `cmo-think 1.2s ease-in-out ${i * 0.2}s infinite`,
                     }} />
                   ))}
@@ -1863,16 +1863,16 @@ export default function InterviewPage() {
           {aiError && (
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
               <div style={{
-                background: '#131208', border: '1px solid rgba(180,120,40,0.25)',
+                background: '#F4F1EA', border: '1px solid rgba(180,120,40,0.25)',
                 borderRadius: '16px 16px 16px 4px', padding: '14px 18px',
                 maxWidth: '78%', display: 'flex', flexDirection: 'column', gap: 12,
               }}>
-                <span style={{ color: '#9A8060', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.55 }}>
+                <span style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 13, lineHeight: 1.55 }}>
                   Sorry — that took longer than expected. Your answers are saved. Pick up right where you left off.
                 </span>
                 <button onClick={retryLastMessage} style={{
-                  alignSelf: 'flex-start', background: '#C8A96E', border: 'none', borderRadius: 6,
-                  padding: '7px 14px', color: '#0C0C09', fontFamily: 'monospace', fontSize: 12,
+                  alignSelf: 'flex-start', background: '#8A6D2F', border: 'none', borderRadius: 6,
+                  padding: '7px 14px', color: '#1A1815', fontFamily: 'monospace', fontSize: 12,
                   fontWeight: 500, cursor: 'pointer', letterSpacing: '0.03em',
                 }}>
                   ↩ Continue where I left off
@@ -1881,7 +1881,7 @@ export default function InterviewPage() {
             </div>
           )}
           {phase === 'done' && (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: '#7EB8A4', fontFamily: 'monospace', fontSize: 12 }}>
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#3F7E68', fontFamily: 'monospace', fontSize: 12 }}>
               ✓ Redirecting to your report...
             </div>
           )}
@@ -1892,21 +1892,21 @@ export default function InterviewPage() {
       {/* Auto-dashboard notification */}
       {phase === 'interview' && dashboardNotif !== 'idle' && (
         <div style={{
-          flexShrink: 0, background: '#0E0E0C',
+          flexShrink: 0, background: '#FFFFFF',
           borderTop: '1px solid rgba(200,169,110,0.2)',
           borderBottom: '1px solid rgba(200,169,110,0.08)',
           padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 12,
         }}>
           <div style={{ flex: 1 }}>
             <div style={{
-              color: dashboardNotif === 'ready' ? '#7EB8A4' : '#C8A96E',
+              color: dashboardNotif === 'ready' ? '#3F7E68' : '#8A6D2F',
               fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginBottom: 5,
             }}>
               {dashboardNotif === 'creating'
                 ? (dashboardNotifStage === 'first' ? '✦ CREATING YOUR DASHBOARD' : '✦ UPDATING YOUR DASHBOARD')
                 : (dashboardNotifStage === 'first' ? '✓ DASHBOARD READY' : '✓ DASHBOARD UPDATED')}
             </div>
-            <div style={{ color: '#6A6A50', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.55 }}>
+            <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.55 }}>
               {dashboardNotif === 'creating' && dashboardNotifStage === 'first'
                 ? 'Your first findings are being mapped — usually takes 20–30 seconds. Find the dashboard in the grid icon (⊞) on the left once it\'s ready.'
                 : dashboardNotif === 'creating'
@@ -1918,32 +1918,32 @@ export default function InterviewPage() {
           </div>
           <button
             onClick={() => setDashboardNotif('idle')}
-            style={{ background: 'none', border: 'none', color: '#3A3A28', cursor: 'pointer', fontFamily: 'monospace', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
+            style={{ background: 'none', border: 'none', color: '#8A857A', cursor: 'pointer', fontFamily: 'monospace', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
           >✕</button>
         </div>
       )}
 
       {/* Input */}
       {(phase === 'intro' || phase === 'interview') && (
-        <div style={{ borderTop: '1px solid #1A1A14', padding: '12px 16px', background: '#0F0F0B', flexShrink: 0 }}>
+        <div style={{ borderTop: '1px solid #E5E1D8', padding: '12px 16px', background: '#FFFFFF', flexShrink: 0 }}>
           <div style={{ maxWidth: 680, margin: '0 auto' }}>
           {phase === 'interview' && completedSummaries.length > 0 && (
             <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 onClick={handleSummarize}
                 style={{
-                  background: 'transparent', border: '1px solid #1E1E14',
+                  background: 'transparent', border: '1px solid #E5E1D8',
                   borderRadius: 4, padding: '4px 10px', cursor: 'pointer',
-                  color: '#3A3A28', fontFamily: 'monospace', fontSize: 10,
+                  color: '#8A857A', fontFamily: 'monospace', fontSize: 10,
                   letterSpacing: '0.06em',
                 }}
                 onMouseEnter={e => {
                   e.currentTarget.style.borderColor = 'rgba(200,169,110,0.3)'
-                  e.currentTarget.style.color = '#C8A96E'
+                  e.currentTarget.style.color = '#8A6D2F'
                 }}
                 onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = '#1E1E14'
-                  e.currentTarget.style.color = '#3A3A28'
+                  e.currentTarget.style.borderColor = '#E5E1D8'
+                  e.currentTarget.style.color = '#8A857A'
                 }}
               >
                 ↻ What have we covered?
@@ -1960,8 +1960,8 @@ export default function InterviewPage() {
               placeholder="Type your answer..."
               rows={2}
               style={{
-                flex: 1, background: '#111110', border: '1px solid #222218',
-                borderRadius: 10, padding: '10px 14px', color: '#E8E0D0',
+                flex: 1, background: '#FFFFFF', border: '1px solid #D8D2C6',
+                borderRadius: 10, padding: '10px 14px', color: '#2A2A28',
                 fontFamily: 'monospace', fontSize: 14, outline: 'none',
                 resize: 'none', lineHeight: 1.5, WebkitAppearance: 'none',
               }}
@@ -1970,9 +1970,9 @@ export default function InterviewPage() {
               onClick={send}
               disabled={loading || !input.trim()}
               style={{
-                background: loading || !input.trim() ? '#1A1A14' : '#C8A96E',
+                background: loading || !input.trim() ? '#E5E1D8' : '#C8A96E',
                 border: 'none', borderRadius: 10, padding: '0 18px',
-                color: loading || !input.trim() ? '#4A4A38' : '#0C0C09',
+                color: loading || !input.trim() ? '#8A857A' : '#1A1815',
                 fontFamily: 'monospace', fontSize: 13, fontWeight: 500,
                 cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
                 minWidth: 64, flexShrink: 0,
@@ -1988,14 +1988,14 @@ export default function InterviewPage() {
       {/* Persistent save bar — always visible during interview for non-logged-in users */}
       {!user && phase === 'interview' && !saveBarDismissed && !showSaveOverlay && (
         <div style={{
-          flexShrink: 0, background: '#0F0F0B', borderTop: '1px solid rgba(200,120,50,0.2)',
+          flexShrink: 0, background: '#FFFFFF', borderTop: '1px solid rgba(200,120,50,0.2)',
           padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <button
             onClick={() => setShowSaveOverlay(true)}
             style={{
               flex: 1, background: 'transparent', border: 'none', cursor: 'pointer',
-              color: '#9A6030', fontFamily: 'monospace', fontSize: 11,
+              color: '#8A5A20', fontFamily: 'monospace', fontSize: 11,
               textAlign: 'left', letterSpacing: '0.03em', padding: 0, lineHeight: 1.4,
             }}
           >
@@ -2005,7 +2005,7 @@ export default function InterviewPage() {
             onClick={() => setSaveBarDismissed(true)}
             style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
-              color: '#3A3A28', fontFamily: 'monospace', fontSize: 16,
+              color: '#8A857A', fontFamily: 'monospace', fontSize: 16,
               padding: '0 4px', flexShrink: 0, lineHeight: 1,
             }}
           >
@@ -2020,21 +2020,21 @@ export default function InterviewPage() {
         position:fixed works relative to the viewport, not the containing block */}
     {showSaveOverlay && !user && (
       <div style={{
-        position: 'fixed', inset: 0, background: 'rgba(12,12,9,0.93)',
+        position: 'fixed', inset: 0, background: 'rgba(251,250,247,0.95)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 9999, padding: 20,
       }}>
         <div style={{
-          background: '#111110', border: '1px solid #2A2018',
+          background: '#FFFFFF', border: '1px solid #D8D2C6',
           borderRadius: 12, padding: '32px 28px', width: '100%', maxWidth: 420,
         }}>
-          <div style={{ color: '#C07050', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>⚠ YOUR DATA IS NOT SAVED</div>
-          <h2 style={{ color: '#E8E0D0', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>Save your progress</h2>
-          <p style={{ color: '#6A6A4A', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.75, marginBottom: 20 }}>
+          <div style={{ color: '#BF4A2E', fontSize: 11, letterSpacing: '0.15em', fontFamily: 'monospace', marginBottom: 8 }}>⚠ YOUR DATA IS NOT SAVED</div>
+          <h2 style={{ color: '#2A2A28', fontSize: 20, fontWeight: 400, marginBottom: 12 }}>Save your progress</h2>
+          <p style={{ color: '#6B675E', fontSize: 13, fontFamily: 'monospace', lineHeight: 1.75, marginBottom: 20 }}>
             Everything you've answered so far exists only in this browser tab. A page refresh, network error, or browser crash will permanently delete all of it — there is no recovery. Create a free account and your progress is saved after every answer.
           </p>
 
-          {authError && <div style={{ color: '#C07050', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>}
+          {authError && <div style={{ color: '#BF4A2E', fontFamily: 'monospace', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>{authError}</div>}
 
           {overlayMode === 'signup' ? (
             <>
@@ -2074,12 +2074,12 @@ export default function InterviewPage() {
             </>
           )}
 
-          <div style={{ height: 1, background: '#1A1A14', margin: '8px 0 12px' }} />
+          <div style={{ height: 1, background: '#E5E1D8', margin: '8px 0 12px' }} />
           <button
             onClick={() => { setShowSaveOverlay(false); setSaveOverlayDismissed(true) }}
             style={{
               width: '100%', background: 'transparent', border: 'none',
-              padding: '8px', color: '#2E2E1E', fontFamily: 'monospace', fontSize: 11,
+              padding: '8px', color: '#D8D2C6', fontFamily: 'monospace', fontSize: 11,
               cursor: 'pointer', lineHeight: 1.6, textAlign: 'center',
             }}
           >

@@ -109,24 +109,24 @@ function HistoryContent() {
   }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 12 }}>Loading transcript…</span>
+    <div style={{ minHeight: '100vh', background: '#FBFAF7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12 }}>Loading transcript…</span>
     </div>
   )
   if (error) return (
-    <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ color: '#E07B5A', fontFamily: 'monospace', fontSize: 12 }}>{error}</span>
+    <div style={{ minHeight: '100vh', background: '#FBFAF7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ color: '#BF4A2E', fontFamily: 'monospace', fontSize: 12 }}>{error}</span>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0C0C09', color: '#E8E0D0' }}>
+    <div style={{ minHeight: '100vh', background: '#FBFAF7', color: '#2A2A28' }}>
       <ClientNav
         sessionId={sessionId}
         active="history"
         businessName={businessName}
         actions={
-          <span style={{ color: '#2A2A1E', fontFamily: 'monospace', fontSize: 10 }}>
+          <span style={{ color: '#D8D2C6', fontFamily: 'monospace', fontSize: 10 }}>
             {formatDate(createdAt)}
           </span>
         }
@@ -134,7 +134,7 @@ function HistoryContent() {
 
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '24px 16px 80px' }}>
         {messages.length === 0 ? (
-          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 12, textAlign: 'center', padding: '60px 0' }}>
+          <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12, textAlign: 'center', padding: '60px 0' }}>
             No conversation recorded yet.
           </div>
         ) : (
@@ -147,7 +147,7 @@ function HistoryContent() {
                 <div key={i} style={{
                   textAlign: 'center', padding: '16px 0 8px',
                   fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.12em',
-                  color: '#3A3A28',
+                  color: '#8A857A',
                 }}>
                   {msg.content}
                 </div>
@@ -156,11 +156,11 @@ function HistoryContent() {
                 <div key={i} style={{ display: 'flex', justifyContent: isAssistant ? 'flex-start' : 'flex-end' }}>
                   <div style={{
                     maxWidth: '78%',
-                    background: isAssistant ? '#111110' : '#0F0F0A',
-                    border: `1px solid ${isAssistant ? '#1E1E14' : '#161612'}`,
+                    background: isAssistant ? '#FFFFFF' : '#FFFFFF',
+                    border: `1px solid ${isAssistant ? '#E5E1D8' : '#F4F1EA'}`,
                     borderRadius: isAssistant ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
                     padding: '10px 14px',
-                    color: isAssistant ? '#C8B070' : '#9A9888',
+                    color: isAssistant ? '#8A6D2F' : '#6B675E',
                     fontFamily: 'Georgia, serif',
                     fontSize: 14, lineHeight: 1.6,
                     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -180,8 +180,8 @@ function HistoryContent() {
 export default function HistoryPage() {
   return (
     <Suspense fallback={
-      <div style={{ minHeight: '100vh', background: '#0C0C09', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 12 }}>Loading…</div>
+      <div style={{ minHeight: '100vh', background: '#FBFAF7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12 }}>Loading…</div>
       </div>
     }>
       <HistoryContent />

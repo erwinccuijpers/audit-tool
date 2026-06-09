@@ -48,7 +48,7 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
   }
 
   if (done) {
-    return <div style={{ color: '#4A6A4A', fontFamily: 'monospace', fontSize: 10, marginTop: 10 }}>Feedback received.</div>
+    return <div style={{ color: '#6A8A78', fontFamily: 'monospace', fontSize: 10, marginTop: 10 }}>Feedback received.</div>
   }
 
   return (
@@ -57,18 +57,18 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
         <button
           onClick={e => { e.stopPropagation(); setOpen(true) }}
           style={{
-            background: 'transparent', border: '1px solid #252520',
+            background: 'transparent', border: '1px solid #D8D2C6',
             borderRadius: 5, padding: '5px 12px', cursor: 'pointer',
-            color: '#5A5A48', fontFamily: 'monospace', fontSize: 10,
+            color: '#D8D2C6', fontFamily: 'monospace', fontSize: 10,
             letterSpacing: '0.06em', transition: 'border-color 0.2s, color 0.2s',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.borderColor = 'rgba(200,169,110,0.3)'
-            e.currentTarget.style.color = '#C8A96E'
+            e.currentTarget.style.color = '#8A6D2F'
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.borderColor = '#252520'
-            e.currentTarget.style.color = '#5A5A48'
+            e.currentTarget.style.borderColor = '#D8D2C6'
+            e.currentTarget.style.color = '#D8D2C6'
           }}
         >
           + Leave feedback
@@ -82,8 +82,8 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
             rows={3}
             autoFocus
             style={{
-              background: '#0C0C09', border: '1px solid #1E1E14', borderRadius: 6,
-              padding: '8px 10px', color: '#D0C8B8', fontFamily: 'monospace',
+              background: '#FBFAF7', border: '1px solid #E5E1D8', borderRadius: 6,
+              padding: '8px 10px', color: '#1A1815', fontFamily: 'monospace',
               fontSize: 11, outline: 'none', resize: 'none', lineHeight: 1.5,
               width: '100%', boxSizing: 'border-box',
             }}
@@ -93,9 +93,9 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
               onClick={submit}
               disabled={!text.trim() || loading}
               style={{
-                background: !text.trim() || loading ? '#1A1A14' : '#C8A96E',
+                background: !text.trim() || loading ? '#E5E1D8' : '#C8A96E',
                 border: 'none', borderRadius: 5, padding: '6px 14px',
-                color: !text.trim() || loading ? '#3A3A28' : '#0C0C09',
+                color: !text.trim() || loading ? '#8A857A' : '#1A1815',
                 fontFamily: 'monospace', fontSize: 11,
                 cursor: !text.trim() || loading ? 'default' : 'pointer',
               }}
@@ -104,7 +104,7 @@ function FeedbackWidget({ sessionId, category, recommendation }: { sessionId: st
             </button>
             <button
               onClick={() => setOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#2A2A20', fontFamily: 'monospace', fontSize: 11, cursor: 'pointer' }}
+              style={{ background: 'none', border: 'none', color: '#D8D2C6', fontFamily: 'monospace', fontSize: 11, cursor: 'pointer' }}
             >
               Cancel
             </button>
@@ -125,24 +125,24 @@ type CategoryInsight = {
 }
 
 function confidenceBarColor(score: number): string {
-  if (score <= 25) return '#2A2A20'
-  if (score <= 50) return '#7A5A20'
-  if (score <= 75) return '#C8A96E'
-  return '#6A9A6A'
+  if (score <= 25) return '#D8D2C6'
+  if (score <= 50) return '#8A5A20'
+  if (score <= 75) return '#8A6D2F'
+  return '#3F7E68'
 }
 
 function confidenceBorderColor(score: number): string {
-  if (score <= 25) return '#1A1A14'
+  if (score <= 25) return '#E5E1D8'
   if (score <= 50) return 'rgba(122,90,32,0.3)'
   if (score <= 75) return 'rgba(200,169,110,0.25)'
   return 'rgba(106,154,106,0.3)'
 }
 
 function confidenceLabelColor(score: number): string {
-  if (score <= 25) return '#3A3A28'
-  if (score <= 50) return '#8A6A30'
-  if (score <= 75) return '#C8A96E'
-  return '#7AAA7A'
+  if (score <= 25) return '#8A857A'
+  if (score <= 50) return '#8A5A20'
+  if (score <= 75) return '#8A6D2F'
+  return '#3F7E68'
 }
 
 function DashboardContent() {
@@ -404,7 +404,7 @@ function DashboardContent() {
           }
         `}</style>
         <div style={{
-          minHeight: '100dvh', background: '#0C0C09',
+          minHeight: '100dvh', background: '#FBFAF7',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexDirection: 'column', gap: 18,
         }}>
@@ -417,12 +417,12 @@ function DashboardContent() {
             ))}
           </div>
           <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ color: '#C8A96E', fontFamily: 'monospace', fontSize: 13 }}>{loadingMessage}</div>
-            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 11 }}>
+            <div style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 13 }}>{loadingMessage}</div>
+            <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 11 }}>
               This usually takes 30–60 seconds
             </div>
             {loadingSlow && (
-              <div style={{ color: '#6A6A50', fontFamily: 'monospace', fontSize: 11, marginTop: 4 }}>
+              <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 11, marginTop: 4 }}>
                 Don't worry, we're still on it — just taking a bit longer than expected.
               </div>
             )}
@@ -436,19 +436,19 @@ function DashboardContent() {
   if (error) {
     return (
       <div style={{
-        minHeight: '100dvh', background: '#0C0C09',
+        minHeight: '100dvh', background: '#FBFAF7',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         <div style={{
-          background: '#111110', border: '1px solid #222218', borderRadius: 12,
+          background: '#FFFFFF', border: '1px solid #D8D2C6', borderRadius: 12,
           padding: '28px', maxWidth: 380, textAlign: 'center',
         }}>
-          <div style={{ color: '#9A7050', fontFamily: 'monospace', fontSize: 13, marginBottom: 16 }}>{error}</div>
+          <div style={{ color: '#6B675E', fontFamily: 'monospace', fontSize: 13, marginBottom: 16 }}>{error}</div>
           <button
             onClick={() => { sessionStorage.setItem('autoResume', 'true'); router.push('/') }}
             style={{
               background: '#C8A96E', border: 'none', borderRadius: 6,
-              padding: '10px 20px', color: '#0C0C09', fontFamily: 'monospace',
+              padding: '10px 20px', color: '#1A1815', fontFamily: 'monospace',
               fontSize: 13, cursor: 'pointer',
             }}
           >
@@ -460,7 +460,7 @@ function DashboardContent() {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', background: '#0C0C09', fontFamily: 'Georgia, serif' }}>
+    <div style={{ minHeight: '100dvh', background: '#FBFAF7', fontFamily: 'Georgia, serif' }}>
 
       {/* Header */}
       <ClientNav
@@ -474,13 +474,13 @@ function DashboardContent() {
                 onClick={handleReopen}
                 disabled={reopening}
                 style={{
-                  background: 'transparent', border: '1px solid #252520',
+                  background: 'transparent', border: '1px solid #D8D2C6',
                   borderRadius: 5, padding: '4px 12px', cursor: reopening ? 'default' : 'pointer',
-                  color: reopening ? '#3A3A28' : '#7A7A58', fontFamily: 'monospace', fontSize: 11,
+                  color: reopening ? '#8A857A' : '#5A564E', fontFamily: 'monospace', fontSize: 11,
                   letterSpacing: '0.05em', transition: 'all 0.2s',
                 }}
-                onMouseEnter={e => { if (!reopening) { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.35)'; e.currentTarget.style.color = '#C8A96E' } }}
-                onMouseLeave={e => { if (!reopening) { e.currentTarget.style.borderColor = '#252520'; e.currentTarget.style.color = '#7A7A58' } }}
+                onMouseEnter={e => { if (!reopening) { e.currentTarget.style.borderColor = 'rgba(200,169,110,0.35)'; e.currentTarget.style.color = '#8A6D2F' } }}
+                onMouseLeave={e => { if (!reopening) { e.currentTarget.style.borderColor = '#D8D2C6'; e.currentTarget.style.color = '#5A564E' } }}
               >
                 {reopening ? 'Opening...' : '+ Continue interview'}
               </button>
@@ -491,15 +491,15 @@ function DashboardContent() {
               title="Recompute dashboard from latest data"
               style={{
                 background: 'transparent', border: 'none', cursor: refreshing ? 'default' : 'pointer',
-                color: refreshing ? '#2A2A1E' : '#3A3A28', fontFamily: 'monospace', fontSize: 11,
+                color: refreshing ? '#D8D2C6' : '#8A857A', fontFamily: 'monospace', fontSize: 11,
                 padding: 0, transition: 'color 0.2s',
               }}
-              onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#C8A96E' }}
-              onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#3A3A28' }}
+              onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#8A6D2F' }}
+              onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#8A857A' }}
             >
               {refreshing ? '↻ refreshing...' : '↻ refresh'}
             </button>
-            <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 10 }}>
+            <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 10 }}>
               {coveredCount} of {categories.length} areas covered
             </div>
           </>
@@ -510,15 +510,15 @@ function DashboardContent() {
       <div style={{ padding: '24px 20px', maxWidth: 1100, margin: '0 auto' }}>
 
         <div style={{ marginBottom: 20 }}>
-          <h1 style={{ color: '#E8E0D0', fontSize: 18, fontWeight: 400, margin: '0 0 6px' }}>Diagnostic Overview</h1>
-          <p style={{ color: '#4A4A38', fontFamily: 'monospace', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
+          <h1 style={{ color: '#2A2A28', fontSize: 18, fontWeight: 400, margin: '0 0 6px' }}>Diagnostic Overview</h1>
+          <p style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
             Confidence scores reflect how much data has actually been collected — not an evaluation of your business. Go deeper in the interview to raise them.
           </p>
         </div>
 
         {emergingPicture && (
           <div style={{
-            background: '#0F0F0A',
+            background: '#FFFFFF',
             border: '1px solid rgba(200,169,110,0.15)',
             borderLeft: '3px solid rgba(200,169,110,0.4)',
             borderRadius: 8,
@@ -527,11 +527,11 @@ function DashboardContent() {
           }}>
             <div style={{
               fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.12em',
-              color: '#5A5040', marginBottom: 8,
+              color: '#D8D2C6', marginBottom: 8,
             }}>
               {coveredCount >= categories.length && categories.length > 0 ? 'YOUR PICTURE — COMPLETE' : 'EARLY PICTURE — INCOMPLETE'}
             </div>
-            <p style={{ color: '#B8A880', fontSize: 14, lineHeight: 1.7, margin: 0, fontFamily: 'Georgia, serif' }}>
+            <p style={{ color: '#6B675E', fontSize: 14, lineHeight: 1.7, margin: 0, fontFamily: 'Georgia, serif' }}>
               {emergingPicture}
             </p>
           </div>
@@ -540,7 +540,7 @@ function DashboardContent() {
         {categories.length === 0 ? (
           <div style={{
             textAlign: 'center', padding: '60px 20px',
-            color: '#3A3A28', fontFamily: 'monospace', fontSize: 12,
+            color: '#8A857A', fontFamily: 'monospace', fontSize: 12,
           }}>
             No interview data found for this session.
           </div>
@@ -569,8 +569,8 @@ function DashboardContent() {
                   key={cat.category}
                   onClick={() => setExpanded(isExpanded ? null : cat.category)}
                   style={{
-                    background: '#111110',
-                    border: `1px solid ${isExpanded ? borderColor : '#1A1A14'}`,
+                    background: '#FFFFFF',
+                    border: `1px solid ${isExpanded ? borderColor : '#E5E1D8'}`,
                     borderRadius: 10, padding: '16px', cursor: 'pointer',
                     transition: 'border-color 0.2s',
                   }}
@@ -578,17 +578,17 @@ function DashboardContent() {
                     if (!isExpanded) (e.currentTarget as HTMLDivElement).style.borderColor = borderColor
                   }}
                   onMouseLeave={e => {
-                    if (!isExpanded) (e.currentTarget as HTMLDivElement).style.borderColor = '#1A1A14'
+                    if (!isExpanded) (e.currentTarget as HTMLDivElement).style.borderColor = '#E5E1D8'
                   }}
                 >
                   {/* Card header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <span style={{ color: '#D0C8B8', fontSize: 13, fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+                    <span style={{ color: '#1A1815', fontSize: 13, fontFamily: 'monospace', letterSpacing: '0.04em' }}>
                       {cat.category}
                     </span>
                     <span style={{
                       fontSize: 9, fontFamily: 'monospace', letterSpacing: '0.08em',
-                      color: labelColor, background: '#0C0C09',
+                      color: labelColor, background: '#FBFAF7',
                       border: `1px solid ${borderColor}`, borderRadius: 3,
                       padding: '2px 7px',
                     }}>
@@ -599,10 +599,10 @@ function DashboardContent() {
                   {/* Confidence bar */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 9 }}>CONFIDENCE</span>
+                      <span style={{ color: '#D8D2C6', fontFamily: 'monospace', fontSize: 9 }}>CONFIDENCE</span>
                       <span style={{ color: labelColor, fontFamily: 'monospace', fontSize: 9 }}>{cat.confidence}%</span>
                     </div>
-                    <div style={{ height: 3, background: '#1A1A14', borderRadius: 2 }}>
+                    <div style={{ height: 3, background: '#E5E1D8', borderRadius: 2 }}>
                       <div style={{
                         width: `${cat.confidence}%`, height: '100%',
                         background: barColor, borderRadius: 2,
@@ -613,7 +613,7 @@ function DashboardContent() {
 
                   {/* Expand toggle */}
                   <div style={{
-                    color: '#2A2A20', fontFamily: 'monospace', fontSize: 9,
+                    color: '#D8D2C6', fontFamily: 'monospace', fontSize: 9,
                     letterSpacing: '0.06em',
                   }}>
                     {isExpanded ? '▲ COLLAPSE' : '▼ DETAILS'}
@@ -622,21 +622,21 @@ function DashboardContent() {
                   {/* Expanded content */}
                   {isExpanded && (
                     <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      <div style={{ height: 1, background: '#1A1A14' }} />
+                      <div style={{ height: 1, background: '#E5E1D8' }} />
 
                       {/* Evidence indicator */}
                       {taggedSummaries.length > 0 && (
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                          <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em' }}>EVIDENCE</span>
+                          <span style={{ color: '#D8D2C6', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em' }}>EVIDENCE</span>
                           <div style={{ display: 'flex', gap: 4 }}>
                             {Array.from({ length: dataBackedCount }).map((_, i) => (
-                              <span key={`d${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4A7A4A', display: 'inline-block' }} title="Data-backed" />
+                              <span key={`d${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#3F7E68', display: 'inline-block' }} title="Data-backed" />
                             ))}
                             {Array.from({ length: gutCount }).map((_, i) => (
-                              <span key={`g${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#7A5A28', display: 'inline-block' }} title="Gut feel" />
+                              <span key={`g${i}`} style={{ width: 8, height: 8, borderRadius: '50%', background: '#8A5A20', display: 'inline-block' }} title="Gut feel" />
                             ))}
                           </div>
-                          <span style={{ color: '#2A2A20', fontFamily: 'monospace', fontSize: 9 }}>
+                          <span style={{ color: '#D8D2C6', fontFamily: 'monospace', fontSize: 9 }}>
                             {dataBackedCount > 0 && `${dataBackedCount} confirmed`}
                             {dataBackedCount > 0 && gutCount > 0 && ' · '}
                             {gutCount > 0 && `${gutCount} estimated`}
@@ -645,20 +645,20 @@ function DashboardContent() {
                       )}
 
                       <div>
-                        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
+                        <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
                           CURRENT SITUATION
                         </div>
-                        <p style={{ color: '#9A9080', fontSize: 13, lineHeight: 1.65, margin: 0 }}>
+                        <p style={{ color: '#6B675E', fontSize: 13, lineHeight: 1.65, margin: 0 }}>
                           {cat.situation}
                         </p>
                       </div>
 
                       <div>
-                        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
+                        <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
                           RECOMMENDATION
                         </div>
                         <p style={{
-                          color: cat.confidence > 50 ? '#C8A96E' : '#5A5040',
+                          color: cat.confidence > 50 ? '#8A6D2F' : '#D8D2C6',
                           fontSize: 13, lineHeight: 1.65, margin: 0,
                         }}>
                           {cat.recommendation}
@@ -674,16 +674,16 @@ function DashboardContent() {
 
                       {hasGaps && (
                         <div>
-                          <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
+                          <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.1em', marginBottom: 6 }}>
                             DATA GAPS
                           </div>
                           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {cat.data_gaps.map((gap, i) => (
                               <li key={i} style={{
-                                color: '#4A4A38', fontFamily: 'monospace', fontSize: 11,
+                                color: '#8A857A', fontFamily: 'monospace', fontSize: 11,
                                 paddingLeft: 12, position: 'relative',
                               }}>
-                                <span style={{ position: 'absolute', left: 0, color: '#2A2A20' }}>·</span>
+                                <span style={{ position: 'absolute', left: 0, color: '#D8D2C6' }}>·</span>
                                 {gap}
                               </li>
                             ))}
@@ -707,10 +707,10 @@ export default function DashboardPage() {
   return (
     <Suspense fallback={
       <div style={{
-        minHeight: '100dvh', background: '#0C0C09',
+        minHeight: '100dvh', background: '#FBFAF7',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <div style={{ color: '#3A3A28', fontFamily: 'monospace', fontSize: 12 }}>Loading...</div>
+        <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12 }}>Loading...</div>
       </div>
     }>
       <DashboardContent />
