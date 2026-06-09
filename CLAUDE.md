@@ -69,6 +69,7 @@ A structured business diagnostic interview tool that helps small business owners
 - **Forgot password** — reset link via email, password update screen on return
 - **Category flow strip** — deduped category pills below header, highlights current area, checks off completed ones
 - **"✓ saving" badge** in header when user is logged in
+- **Document-grade PDF export** — `src/components/ReportPdf.tsx` builds a light-themed, text-selectable PDF via `@react-pdf/renderer` (NOT a screenshot of the dark page). Letterhead with business name + running header + page numbers on every page; reuses the existing `Report` data. Imported *dynamically* from the results page (`await import('@/components/ReportPdf')`) so the heavy lib never hits SSR/initial bundle. Light-theme palette + readability rationale chosen deliberately (positive polarity, warm off-white #FBFAF7, charcoal ink #2A2A28, gold kept as accent only). Falls back to `window.print()` if generation throws.
 - Live at **pocketcmo.pro**, code on GitHub at erwinccuijpers/audit-tool
 
 ---

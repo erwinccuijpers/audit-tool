@@ -69,6 +69,7 @@ function ResultsContent() {
   const [error, setError] = useState('')
   const [openArea, setOpenArea] = useState<number | null>(null)
   const [expandAll, setExpandAll] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const printMode = searchParams.get('print') === '1'
 
   useEffect(() => {
@@ -84,19 +85,31 @@ function ResultsContent() {
     })
   }, [sessionId])
 
-  // When arriving with ?print=1 (the hub's "Download PDF"), expand everything
-  // and open the browser print dialog so the user can save as PDF.
+  // When arriving with ?print=1 (the hub's "Download PDF"), auto-generate the
+  // light-themed document PDF once the report has loaded.
   useEffect(() => {
     if (printMode && report && !loading) {
-      setExpandAll(true)
-      const t = setTimeout(() => window.print(), 600)
+      const t = setTimeout(() => { downloadPdf() }, 400)
       return () => clearTimeout(t)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printMode, report, loading])
 
-  function downloadPdf() {
-    setExpandAll(true)
-    setTimeout(() => window.print(), 300)
+  // Generate a clean, text-selectable document PDF (light theme, letterhead,
+  // page numbers). Falls back to the browser print dialog if generation fails.
+  async function downloadPdf() {
+    if (!report || generating) return
+    setGenerating(true)
+    try {
+      const { downloadReportPdf } = await import('@/components/ReportPdf')
+      await downloadReportPdf(report, businessName)
+    } catch (e) {
+      console.error('PDF generation failed, falling back to print', e)
+      setExpandAll(true)
+      setTimeout(() => window.print(), 300)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   if (loading) return (
@@ -176,12 +189,14 @@ function ResultsContent() {
         actions={
           <button
             onClick={downloadPdf}
+            disabled={generating}
             title="Download this report as a PDF"
             style={{
               background: 'transparent', border: '1px solid #2A2A1E', borderRadius: 6,
-              padding: '5px 12px', color: '#6A6450', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em', cursor: 'pointer',
+              padding: '5px 12px', color: '#6A6450', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.06em',
+              cursor: generating ? 'default' : 'pointer', opacity: generating ? 0.6 : 1,
             }}
-          >⤓ Download PDF</button>
+          >{generating ? '⤓ Generating…' : '⤓ Download PDF'}</button>
         }
       />
       {/* Report document header */}
