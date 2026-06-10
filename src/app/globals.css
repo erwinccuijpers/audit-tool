@@ -36,3 +36,6 @@ html, body { max-width: 100%; overflow-x: clip; }
 @media (max-width: 640px) {
   input, textarea, select { font-size: 16px !important; }
 }
+
+/* Used by the "Building section summary…" pill shown while a pillar is wrapping up. */
+@keyframes pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }

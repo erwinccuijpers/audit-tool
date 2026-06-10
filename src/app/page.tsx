@@ -163,6 +163,14 @@ export default function InterviewPage() {
   const [pillarSummaries, setPillarSummaries] = useState<Record<string, PillarSummary>>({})
   const [pillarQuestions, setPillarQuestions] = useState<Record<string, PillarQuestion[]>>({})
   const [generatingSummary, setGeneratingSummary] = useState(false)
+  // Elapsed seconds while wrapping up a pillar — drives a time-aware reassurance line
+  // (the section-summary synthesis can take ~30–60s).
+  const [summarySeconds, setSummarySeconds] = useState(0)
+  useEffect(() => {
+    if (!generatingSummary) { setSummarySeconds(0); return }
+    const t = setInterval(() => setSummarySeconds(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [generatingSummary])
   const pillarSummariesRef = useRef<Record<string, PillarSummary>>({})
   // Keep ref in sync so async callbacks always have latest value
   useEffect(() => { pillarSummariesRef.current = pillarSummaries }, [pillarSummaries])
@@ -1960,8 +1968,15 @@ export default function InterviewPage() {
               <style>{`@keyframes cmo-think { 0%, 100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }`}</style>
               <div style={{ background: '#FFFFFF', border: '1px solid #E5E1D8', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 9 }}>
                 {generatingSummary && pillarMode ? (
-                  <span style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 12 }}>
-                    Wrapping up {PILLAR_LABELS[PILLAR_ORDER[currentPillarIndex] as PillarName] || 'this section'} — pulling your findings together
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ color: '#8A6D2F', fontFamily: 'monospace', fontSize: 13, fontWeight: 500 }}>
+                      ✦ Wrapping up {PILLAR_LABELS[PILLAR_ORDER[currentPillarIndex] as PillarName] || 'this section'} — pulling your findings together
+                    </span>
+                    <span style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5 }}>
+                      {summarySeconds < 20
+                        ? 'This takes a moment — hang tight, nothing for you to do.'
+                        : 'Still working — almost there, thanks for your patience.'}
+                    </span>
                   </span>
                 ) : (
                   <span style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 12 }}>thinking</span>
