@@ -12,7 +12,7 @@ const PILLAR_FOCUS: Record<string, string> = {
   acquisition:  'how new clients find and decide to buy, what channels actually work, and what the acquisition cost and conversion looks like',
   retention:    'how much repeat business exists, what client lifetime value looks like, and whether there is any system for keeping or re-engaging clients',
   revenue:      'average transaction value, upsell and cross-sell behaviour, untapped revenue adjacencies, and pricing logic',
-  strategy:     'long-term direction, capacity constraints, risk tolerance, pricing strategy, and operational bottlenecks',
+  strategy:     'long-term direction, pricing strategy, risk tolerance, and — crucially — how the work actually gets delivered day-to-day and where that flow physically breaks down under load (capacity, space, sequencing, prep, the trade-offs made when something goes wrong mid-service)',
   tools:        'the tech stack (POS, CRM, scheduling, accounting, loyalty), what data it produces, and whether the owner actually uses that data',
   people:       'team stability, retention, culture, how much relies on the owner personally, and what is at risk if a key person leaves',
 }
@@ -66,6 +66,21 @@ Do NOT ask about staff retention, team churn, hiring, who might leave, or workpl
   } else if (pillarName === 'people' && staffUnknown) {
     soloPeopleGuard = `\n\nIMPORTANT — YOU DO NOT YET KNOW IF THIS OWNER HAS STAFF:
 Open by establishing it, naturally: "Before we get into this — is it just you running things, or do you have people working with you?" Do NOT assume "it's just you." Then adapt: if they have a team, explore stability, delegation, and key-person risk; if it's just them, pivot to owner-dependency and continuity (what happens if they're out, who could cover, what only lives in their head).`
+  }
+
+  // Operational-workflow probe — the single biggest blind spot in past reports.
+  // Owners almost never volunteer their day-to-day delivery friction because
+  // it's "just how it's always been," so the consultant must actively dig it out.
+  let opsProbe = ''
+  if (pillarName === 'strategy') {
+    opsProbe = `\n\nOPERATIONAL REALITY — DIG FOR THIS, DON'T WAIT FOR IT:
+Owners rarely raise their day-to-day delivery friction on their own — it feels normal to them, so they don't think to mention it. You must walk them through it. Take them through their busiest, most stressful service / job / period, start to finish, and find where the work physically breaks down:
+- What can't they do in parallel? Where do they lose time or have to backtrack?
+- How do space, storage, layout, equipment or prep force awkward sequencing? (e.g. trips to a stockroom/cellar, a station that bottlenecks, a tool only one person can use)
+- When something goes wrong mid-service, what do they sacrifice to keep the rest moving — and how often does that happen?
+- Is the offer/menu/service range wider than the setup can comfortably deliver? Could fewer, clearer options or splitting parts of the day ease the strain?
+- What would they change about how the work flows if they could?
+These constraints are often the real ceiling on quality and growth. Surface them as concrete observations even when the owner treats them as unremarkable — this is exactly the kind of thing they can't see for themselves.`
   }
 
   // Facts already established in earlier sections — surfaced prominently so the
@@ -122,7 +137,7 @@ ${prevContext ? `WHAT YOU ALREADY KNOW FROM EARLIER SECTIONS:\n${prevContext}` :
 ${establishedFacts ? `\nALREADY ESTABLISHED — DO NOT RE-ASK:\n${establishedFacts}` : ''}
 
 YOUR MISSION FOR THIS SECTION — ${pillarLabel.toUpperCase()}:
-Get enough data to write a genuinely useful diagnostic for: ${pillarFocus}${soloPeopleGuard}
+Get enough data to write a genuinely useful diagnostic for: ${pillarFocus}${soloPeopleGuard}${opsProbe}
 
 QUESTION BANK FOR THIS SECTION (use as inspiration — adapt freely, reorder, skip if irrelevant, add your own if the conversation leads somewhere better):
 ${questionBank}
@@ -132,11 +147,12 @@ HOW TO WORK:
 - The question bank is written in generic retail/D2C language. ALWAYS translate it into the vocabulary of THIS business (see Business + Framing above and the description). A real-estate portfolio has tenants, units, occupancy and yield — not "customers" and "baskets". A consultant has clients, engagements and a pipeline. Never use a term that would feel off to this owner.
 - If the owner's answer to one question reveals the answer to another, don't ask the redundant one.
 - If the conversation opens a better angle, take it.
-- If something from an earlier section is directly relevant here, connect it — "you mentioned earlier that you use Lightspeed, does that mean you can see..."
+- If something from an earlier section is directly relevant here, connect it — frame it as a shared topic, not a claim about who said what: "earlier we touched on Lightspeed — does that mean you can see..."
+- ATTRIBUTION: only put a specific statement in the owner's mouth if they ACTUALLY said it. Never invent a prior remark to set up a question. When referencing earlier ground, prefer neutral framing — "earlier we talked about X", "coming back to X", "on the topic of X" — over "you mentioned / you said X". A good question doesn't need a fabricated lead-in.
 - Probe for specifics: tools named, numbers cited, direct experience vs gut feel.
 - Match the owner's energy. If they're brief, be efficient. If they're expansive, follow the thread.
-- NEVER re-ask a fact listed under "ALREADY ESTABLISHED" above. If you need to reference it, state it back ("you mentioned €20/week earlier…") rather than asking for it again.
-- WATCH FOR CONTRADICTIONS: if something the owner says now conflicts with an earlier fact, don't silently overwrite it — surface it: "Earlier you mentioned X, now it sounds like Y — can I assume Z?"
+- NEVER re-ask a fact listed under "ALREADY ESTABLISHED" above. If you need to reference it, state it back neutrally ("earlier we had the €20/week figure…") rather than asking for it again.
+- WATCH FOR CONTRADICTIONS: if something the owner says now conflicts with an earlier fact, don't silently overwrite it — surface it neutrally: "earlier it sounded like X, now it sounds more like Y — which is closer?"
 
 CAPTURE THE *REASON* BEHIND INACTION (important):
 When the owner is clearly aware of something but hasn't acted on it (e.g. you ask "have you tried / set up / measured X?" and they say "no"), don't just move on. Ask ONE light follow-up to learn WHY they haven't:

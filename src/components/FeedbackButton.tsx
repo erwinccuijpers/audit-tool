@@ -5,6 +5,11 @@ import { supabase } from '@/lib/supabase'
 type Props = {
   sessionId?: string | null
   context?: Record<string, unknown>
+  // Lift the floating button up from the bottom edge so it doesn't sit on top
+  // of a bottom bar (e.g. the interview composer / Send button). Defaults match
+  // the original fixed position.
+  bottomOffset?: number
+  mobileBottomOffset?: number
 }
 
 const CATEGORIES = [
@@ -15,7 +20,7 @@ const CATEGORIES = [
   { value: 'other', label: 'Other' },
 ]
 
-export default function FeedbackButton({ sessionId, context }: Props) {
+export default function FeedbackButton({ sessionId, context, bottomOffset = 20, mobileBottomOffset = 88 }: Props) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [category, setCategory] = useState('stuck')
@@ -88,8 +93,8 @@ export default function FeedbackButton({ sessionId, context }: Props) {
 
   return (
     <>
-    <style>{`@media (max-width: 639px) { .pocket-feedback-wrap { bottom: 88px !important; } }`}</style>
-    <div className="pocket-feedback-wrap" style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 200 }}>
+    <style>{`@media (max-width: 639px) { .pocket-feedback-wrap { bottom: ${mobileBottomOffset}px !important; } }`}</style>
+    <div className="pocket-feedback-wrap" style={{ position: 'fixed', bottom: bottomOffset, right: 20, zIndex: 200 }}>
       {open && (
         <div style={{
           position: 'absolute', bottom: 48, right: 0, width: 290,

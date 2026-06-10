@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import FeedbackButton from '@/components/FeedbackButton'
 import ClientNav from '@/components/ClientNav'
-import { ensureReport } from '@/lib/report'
+import { loadReport } from '@/lib/report'
 
 type AreaScore = {
   category: string
@@ -34,7 +34,6 @@ type Report = {
   bigBets: BigBet[]
 }
 
-// Light-theme score colors — tuned to read on a warm-white background.
 const scoreColor = (s: number) => {
   if (s <= 2) return '#BF4A2E'
   if (s === 3) return '#B08900'
@@ -72,6 +71,14 @@ function ResultsContent() {
   const [expandAll, setExpandAll] = useState(false)
   const [generating, setGenerating] = useState(false)
   const printMode = searchParams.get('print') === '1'
+  // Seconds on the loader — drives a reassurance line once the build runs long
+  // (synthesis over the full transcript can take ~a minute).
+  const [loaderSeconds, setLoaderSeconds] = useState(0)
+  useEffect(() => {
+    if (!loading) return
+    const t = setInterval(() => setLoaderSeconds(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [loading])
 
   useEffect(() => {
     if (!sessionId) {
@@ -79,11 +86,12 @@ function ResultsContent() {
       setLoading(false)
       return
     }
-    ensureReport(sessionId).then(res => {
-      if (res.error) setError(res.error)
-      else { setReport(res.report ?? null); setBusinessName(res.businessName || '') }
-      setLoading(false)
-    })
+    const cleanup = loadReport(
+      sessionId,
+      (rep, bn) => { setReport(rep); setBusinessName(bn); setLoading(false) },
+      (msg) => { setError(msg); setLoading(false) },
+    )
+    return cleanup
   }, [sessionId])
 
   // When arriving with ?print=1 (the hub's "Download PDF"), auto-generate the
@@ -127,7 +135,7 @@ function ResultsContent() {
         }
       `}</style>
       <div style={{ minHeight: '100vh', background: '#FBFAF7', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
-        <div style={{ color: '#9A9488', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.18em', marginBottom: 28 }}>
+        <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.18em', marginBottom: 28 }}>
           DIAGNOSTIC REPORT
         </div>
         <div style={{ width: 180, height: 2, background: '#E5E1D8', borderRadius: 1, position: 'relative', overflow: 'hidden', marginBottom: 28 }}>
@@ -148,8 +156,18 @@ function ResultsContent() {
             }} />
           ))}
         </div>
-        <div style={{ color: '#9A9488', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
-          Analyzing your answers…
+        <div style={{ textAlign: 'center', lineHeight: 1.7 }}>
+          <div style={{ color: '#D8D2C6', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em' }}>
+            Analyzing your answers — this can take up to a minute…
+          </div>
+          <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginTop: 8 }}>
+            Keep this screen open — your report appears here automatically when it&apos;s ready.
+          </div>
+          {loaderSeconds >= 30 && (
+            <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 10, letterSpacing: '0.1em', marginTop: 8 }}>
+              Still gathering — no worries, this one&apos;s taking a bit longer.
+            </div>
+          )}
         </div>
         <FeedbackButton sessionId={sessionId} context={{ phase: 'report_loading' }} />
       </div>
@@ -172,7 +190,7 @@ function ResultsContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#FBFAF7', fontFamily: 'Georgia, serif', color: '#2A2A28' }}>
-      {/* Keep the light theme when saving to PDF; hide interactive controls. */}
+      {/* Keep the dark theme when saving to PDF; hide interactive controls. */}
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -205,7 +223,7 @@ function ResultsContent() {
         <div style={{ maxWidth: 860, margin: '0 auto' }}>
           <div style={{ fontSize: 10, letterSpacing: '0.18em', color: '#8A857A', fontFamily: 'monospace', marginBottom: 6 }}>DIAGNOSTIC REPORT</div>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 400, margin: 0, color: '#1A1815' }}>{businessName}</h1>
+            <h1 style={{ fontSize: 26, fontWeight: 400, margin: 0 }}>{businessName}</h1>
             <div style={{ display: 'flex', gap: 20 }}>
               {[
                 ['Areas Reviewed', areas.length, '#8A6D2F'],
@@ -214,7 +232,7 @@ function ResultsContent() {
               ].map(([l, v, c]) => (
                 <div key={String(l)} style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 20, color: String(c), fontFamily: 'Georgia, serif' }}>{v}</div>
-                  <div style={{ fontSize: 9, letterSpacing: '0.1em', color: '#9A9488', fontFamily: 'monospace' }}>{l}</div>
+                  <div style={{ fontSize: 9, letterSpacing: '0.1em', color: '#8A857A', fontFamily: 'monospace' }}>{l}</div>
                 </div>
               ))}
             </div>
@@ -249,7 +267,7 @@ function ResultsContent() {
                     <div style={{ fontSize: 10, letterSpacing: '0.12em', color: '#8A857A', fontFamily: 'monospace', marginBottom: 6 }}>FINDING</div>
                     <p style={{ fontSize: 13, color: '#5A564E', fontFamily: 'monospace', lineHeight: 1.6, margin: 0 }}>{area.insight}</p>
                   </div>
-                  <div style={{ background: '#F4F1EA', borderLeft: '2px solid #3F7E68', borderRadius: 6, padding: '12px 14px' }}>
+                  <div style={{ background: '#F4F1EA', border: '1px solid #3F7E6828', borderRadius: 6, padding: '12px 14px' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.12em', color: '#3F7E68', fontFamily: 'monospace', marginBottom: 6 }}>▸ OPPORTUNITY</div>
                     <p style={{ fontSize: 13, color: '#5A564E', fontFamily: 'monospace', lineHeight: 1.6, margin: 0 }}>{area.opportunity}</p>
                   </div>
@@ -269,7 +287,7 @@ function ResultsContent() {
               <div style={{ display: 'flex', gap: 14 }}>
                 {[['Effort', w.effort, '#BF4A2E'], ['Impact', w.impact, '#3F7E68']].map(([l, v, c]) => (
                   <div key={String(l)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#9A9488' }}>{l}</span>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#8A857A' }}>{l}</span>
                     <div style={{ display: 'flex', gap: 3 }}>
                       {[1,2,3].map(n => (
                         <div key={n} style={{ width: 6, height: 6, borderRadius: '50%', background: n <= Number(v) ? String(c) : '#E5E1D8' }} />
@@ -289,7 +307,7 @@ function ResultsContent() {
             <div key={i} style={{ background: '#FFFFFF', border: '1px solid #E5E1D8', borderRadius: 8, padding: '16px 20px' }}>
               <div style={{ fontSize: 15, color: '#1A1815', marginBottom: 6 }}>{b.title}</div>
               <p style={{ fontSize: 13, color: '#5A564E', fontFamily: 'monospace', lineHeight: 1.6, margin: '0 0 12px' }}>{b.desc}</p>
-              <div style={{ background: '#F4F1EA', borderLeft: '2px solid #C8A96E', borderRadius: 5, padding: '10px 12px' }}>
+              <div style={{ background: '#F4F1EA', border: '1px solid #C8A96E28', borderRadius: 5, padding: '10px 12px' }}>
                 <span style={{ fontSize: 10, letterSpacing: '0.1em', color: '#8A6D2F', fontFamily: 'monospace' }}>⚑ MVP PATH  </span>
                 <span style={{ fontSize: 12, color: '#5A564E', fontFamily: 'monospace' }}>{b.mvp}</span>
               </div>

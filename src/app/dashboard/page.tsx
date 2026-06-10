@@ -156,8 +156,12 @@ function DashboardContent() {
   const [categoryQuestionsMap, setCategoryQuestionsMap] = useState<Map<string, string[]>>(new Map())
   const [businessName, setBusinessName] = useState('')
   const [sessionStatus, setSessionStatus] = useState('')
+  // True only when this session still has unanswered questions/sections. Gates the
+  // "+ Continue interview" button so a fully-finished session doesn't reopen straight
+  // into the referral popup and bounce back here (re-engagement after new areas are
+  // added still works, because that leaves real work to do).
+  const [hasRemaining, setHasRemaining] = useState(false)
   const [reopening, setReopening] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMessage, setLoadingMessage] = useState('Loading your session...')
   const [loadingSlow, setLoadingSlow] = useState(false)
@@ -217,6 +221,7 @@ function DashboardContent() {
         }
       })
       const completedCount = Object.keys(pillars).length
+      setHasRemaining(completedCount < PILLAR_ORDER.length)
       setCategories(pillarCategories as any)
       setEmergingPicture(completedCount > 0
         ? `${completedCount} of 7 sections completed. ${completedCount < 7 ? 'Dashboard updates automatically as each section closes.' : 'All sections complete — see your full report.'}`
@@ -268,6 +273,8 @@ function DashboardContent() {
     setCategoryQuestionsMap(categoryQuestions)
 
     const summaryMap = new Map(completedSummaries.map(s => [s.question, { summary: s.summary, data_backed: s.data_backed ?? null }]))
+    // Any filtered question with no matching summary is still open work for this session.
+    setHasRemaining(filtered.some((q: any) => !summaryMap.has(q.core_question)))
     const categoryData = categoryOrder.map(cat => {
       const qs = categoryQuestions.get(cat) || []
       return {
@@ -384,14 +391,6 @@ function DashboardContent() {
     router.push('/')
   }
 
-  async function handleRefresh() {
-    if (!sessionId || refreshing) return
-    setRefreshing(true)
-    await supabase.from('sessions').update({ dashboard_cache: null, dashboard_cache_count: null }).eq('id', sessionId)
-    setRefreshing(false)
-    loadDashboard(sessionId)
-  }
-
   const coveredCount = categories.filter(c => c.confidence > 0).length
 
   if (loading) {
@@ -467,9 +466,10 @@ function DashboardContent() {
         sessionId={sessionId}
         active="dashboard"
         businessName={businessName}
+        interviewActive={!['interview_done', 'completed', 'done', 'interested'].includes(sessionStatus)}
         actions={
           <>
-            {sessionStatus === 'completed' && (
+            {sessionStatus === 'completed' && hasRemaining && (
               <button
                 onClick={handleReopen}
                 disabled={reopening}
@@ -485,20 +485,6 @@ function DashboardContent() {
                 {reopening ? 'Opening...' : '+ Continue interview'}
               </button>
             )}
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              title="Recompute dashboard from latest data"
-              style={{
-                background: 'transparent', border: 'none', cursor: refreshing ? 'default' : 'pointer',
-                color: refreshing ? '#D8D2C6' : '#8A857A', fontFamily: 'monospace', fontSize: 11,
-                padding: 0, transition: 'color 0.2s',
-              }}
-              onMouseEnter={e => { if (!refreshing) e.currentTarget.style.color = '#8A6D2F' }}
-              onMouseLeave={e => { if (!refreshing) e.currentTarget.style.color = '#8A857A' }}
-            >
-              {refreshing ? '↻ refreshing...' : '↻ refresh'}
-            </button>
             <div style={{ color: '#8A857A', fontFamily: 'monospace', fontSize: 10 }}>
               {coveredCount} of {categories.length} areas covered
             </div>

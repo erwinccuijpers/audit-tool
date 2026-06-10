@@ -2,9 +2,10 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-export type NavKey = 'hub' | 'dashboard' | 'results' | 'history'
+export type NavKey = 'interview' | 'hub' | 'dashboard' | 'results' | 'history'
 
 const ITEMS: { key: NavKey; label: string; desc: string; path: (id: string) => string }[] = [
+  { key: 'interview', label: 'Interview',    desc: 'Back to the questions',  path: id => `/?resume=${id}` },
   { key: 'hub',       label: 'Dashboard',    desc: 'Your home base',        path: id => `/hub?session=${id}` },
   { key: 'dashboard', label: 'Your 7 areas', desc: 'Section-by-section',    path: id => `/dashboard?session=${id}` },
   { key: 'results',   label: 'Report',       desc: 'Scores & opportunities', path: id => `/results?session=${id}` },
@@ -23,16 +24,25 @@ const LEAD_ITEMS: { key: string; label: string; desc: string; path: (id: string)
 // Shared client-side top bar with a hamburger menu. Used on every post-interview
 // surface (hub, dashboard, report, transcript) so navigation is consistent and
 // the user never gets dropped back into the raw interview chrome.
-export default function ClientNav({ sessionId, active, businessName, actions, className }: {
+export default function ClientNav({ sessionId, active, businessName, actions, className, interviewActive = false }: {
   sessionId: string | null
   active: NavKey
   businessName?: string
   actions?: React.ReactNode
   className?: string
+  // While the interview is still in progress, only the interview itself and the
+  // live "Your 7 areas" board are reachable. The report, dashboard home,
+  // transcript and lead-gen panels are created once at finalization and only
+  // reviewed after — locking them here prevents generating a report from a
+  // half-finished transcript.
+  interviewActive?: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const go = (path: string) => { setOpen(false); router.push(path) }
+
+  const UNLOCKED_DURING_INTERVIEW = new Set<NavKey>(['interview', 'dashboard'])
+  const isLocked = (key: NavKey) => interviewActive && !UNLOCKED_DURING_INTERVIEW.has(key)
 
   return (
     <div className={className} style={{
@@ -72,46 +82,62 @@ export default function ClientNav({ sessionId, active, businessName, actions, cl
             background: '#111110', border: '1px solid #1E1E14', borderRadius: 10,
             minWidth: 220, padding: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
           }}>
-            {ITEMS.map(it => {
+            {ITEMS
+              // Hide "Back to the questions" once the interview is finished — a
+              // completed session has nothing left to resume, so the link would
+              // only bounce through the referral screen back to the dashboard.
+              .filter(it => it.key !== 'interview' || interviewActive)
+              .map(it => {
               const isActive = it.key === active
+              const locked = isLocked(it.key)
               return (
                 <button
                   key={it.key}
-                  onClick={() => sessionId && go(it.path(sessionId))}
+                  onClick={() => { if (!locked && sessionId) go(it.path(sessionId)) }}
+                  disabled={locked}
+                  title={locked ? 'Available once the interview is finished' : undefined}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left',
                     background: isActive ? '#1A1A14' : 'transparent', border: 'none',
-                    borderRadius: 7, padding: '10px 12px', cursor: 'pointer',
-                    marginBottom: 2, transition: 'background 0.15s',
+                    borderRadius: 7, padding: '10px 12px', cursor: locked ? 'default' : 'pointer',
+                    marginBottom: 2, transition: 'background 0.15s', opacity: locked ? 0.4 : 1,
                   }}
-                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#161614' }}
-                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                  onMouseEnter={e => { if (!isActive && !locked) e.currentTarget.style.background = '#161614' }}
+                  onMouseLeave={e => { if (!isActive && !locked) e.currentTarget.style.background = 'transparent' }}
                 >
                   <div style={{ fontFamily: 'Georgia, serif', fontSize: 14, color: isActive ? '#C8A96E' : '#D0C8B8' }}>{it.label}</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#4A4A38', marginTop: 1 }}>{it.desc}</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#4A4A38', marginTop: 1 }}>{locked ? 'Unlocks after completion' : it.desc}</div>
                 </button>
               )
             })}
 
             <div style={{ height: 1, background: '#1E1E14', margin: '6px 8px' }} />
             <div style={{ fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.14em', color: '#3A3A28', padding: '4px 12px 6px' }}>GET INVOLVED</div>
-            {LEAD_ITEMS.map(it => (
-              <button
-                key={it.key}
-                onClick={() => sessionId && go(it.path(sessionId))}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  background: 'transparent', border: 'none',
-                  borderRadius: 7, padding: '10px 12px', cursor: 'pointer',
-                  marginBottom: 2, transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#161614' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-              >
-                <div style={{ fontFamily: 'Georgia, serif', fontSize: 14, color: '#D0C8B8' }}>{it.label}</div>
-                <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#4A4A38', marginTop: 1 }}>{it.desc}</div>
-              </button>
-            ))}
+            {LEAD_ITEMS.map(it => {
+              // Feedback ("Work with us / send a suggestion") stays reachable
+              // during the interview so people can flag things as they go. The
+              // other lead offers need the finished report, so they stay locked.
+              const locked = interviewActive && it.key !== 'suggestion'
+              return (
+                <button
+                  key={it.key}
+                  onClick={() => { if (!locked && sessionId) go(it.path(sessionId)) }}
+                  disabled={locked}
+                  title={locked ? 'Available once the interview is finished' : undefined}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    background: 'transparent', border: 'none',
+                    borderRadius: 7, padding: '10px 12px', cursor: locked ? 'default' : 'pointer',
+                    marginBottom: 2, transition: 'background 0.15s', opacity: locked ? 0.4 : 1,
+                  }}
+                  onMouseEnter={e => { if (!locked) e.currentTarget.style.background = '#161614' }}
+                  onMouseLeave={e => { if (!locked) e.currentTarget.style.background = 'transparent' }}
+                >
+                  <div style={{ fontFamily: 'Georgia, serif', fontSize: 14, color: '#D0C8B8' }}>{it.label}</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#4A4A38', marginTop: 1 }}>{locked ? 'Unlocks after completion' : it.desc}</div>
+                </button>
+              )
+            })}
           </div>
         </>
       )}
